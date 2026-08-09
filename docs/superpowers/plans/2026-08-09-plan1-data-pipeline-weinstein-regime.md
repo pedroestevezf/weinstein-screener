@@ -6,12 +6,12 @@
 
 **Architecture:** Paquete Python plano (`weinstein_screener/`) con módulos independientes: `data.py` (descarga/caché), `indicators.py` (funciones puras sobre DataFrames de pandas), `regime.py` (lógica de negocio de Weinstein sobre los indicadores). Cada módulo es testeable de forma aislada sin red ni disco real (inyección de dependencias para `downloader` en `data.py`, `tmp_path` de pytest para el caché).
 
-**Tech Stack:** Python 3.11+, pandas, yfinance, pyarrow (caché en parquet), pytest.
+**Tech Stack:** Python 3.9+, pandas, yfinance, pyarrow (caché en parquet), pytest.
 
 ## Global Constraints
 
-- Python 3.11+, entorno virtual local en `.venv/`.
-- Dependencias fijadas en `requirements.txt`, sin versiones sin acotar.
+- Python 3.9+, entorno virtual local en `.venv/`. (Ajustado durante la implementación: la máquina de desarrollo solo tiene Python 3.9.6 disponible, sin Homebrew/pyenv instalados; instalar 3.11+ habría requerido cambios a nivel de sistema que se han evitado deliberadamente. El código no usa ninguna sintaxis específica de 3.11.)
+- Dependencias fijadas en `requirements.txt`, con cota superior (ej. `pandas>=2.0,<3.0`) — nunca solo un mínimo sin acotar.
 - Ninguna llamada de red en los tests unitarios — toda función que llame a yfinance debe aceptar un `downloader` inyectable.
 - Los parámetros de ventana/lookback (MA30, slope_lookback, ventana ATR) son argumentos de función con valor por defecto, nunca constantes hardcodeadas sin parámetro — varios están marcados como "a validar en backtest" en el documento de diseño (`2026-08-09-estrategia-weinstein-wyckoff-crt-ict-design.md`, sección 8) y deben poder variarse sin tocar el código interno.
 
