@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from pathlib import Path
+
 import pandas as pd
 import yfinance as yf
 
@@ -30,4 +33,25 @@ def fetch_ohlcv(
 
     df = raw[OHLCV_COLUMNS].copy()
     df.index.name = "Date"
+    return df
+
+
+def get_cached_ohlcv(
+    ticker: str,
+    interval: str,
+    cache_dir: Path,
+    max_age_days: int = 1,
+    downloader=None,
+) -> pd.DataFrame:
+    """Devuelve OHLCV para un ticker, usando un caché local en parquet si está fresco."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{ticker}_{interval}.parquet"
+
+    if cache_path.exists():
+        age_seconds = time.time() - cache_path.stat().st_mtime
+        if age_seconds <= max_age_days * 86400:
+            return pd.read_parquet(cache_path)
+
+    df = fetch_ohlcv(ticker, interval, downloader=downloader)
+    df.to_parquet(cache_path)
     return df
