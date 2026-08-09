@@ -58,3 +58,33 @@ def test_average_true_range_matches_manual_calculation():
     assert atr.iloc[1] == pytest.approx(3.0)
     assert atr.iloc[2] == pytest.approx(3.5)
     assert atr.iloc[3] == pytest.approx(4.5)
+
+
+def test_average_true_range_wilder_method_differs_from_sma():
+    dates = pd.date_range("2024-01-01", periods=6, freq="D")
+    df = pd.DataFrame(
+        {
+            "Open": [10, 12, 11, 15, 13, 17],
+            "High": [11, 14, 13, 18, 16, 20],
+            "Low": [9, 10, 10, 12, 11, 14],
+            "Close": [10, 12, 12, 16, 14, 18],
+            "Volume": [100] * 6,
+        },
+        index=dates,
+    )
+
+    atr_sma = average_true_range(df, window=3, method="sma")
+    atr_wilder = average_true_range(df, window=3, method="wilder")
+
+    assert atr_sma.iloc[-1] != pytest.approx(atr_wilder.iloc[-1])
+
+
+def test_average_true_range_rejects_invalid_method():
+    dates = pd.date_range("2024-01-01", periods=2, freq="D")
+    df = pd.DataFrame(
+        {"Open": [10, 11], "High": [11, 12], "Low": [9, 10], "Close": [10, 11], "Volume": [100, 100]},
+        index=dates,
+    )
+
+    with pytest.raises(ValueError, match="method"):
+        average_true_range(df, method="bogus")
