@@ -216,8 +216,12 @@ def test_detect_wyckoff_structure_returns_none_without_a_climax():
 
 
 def test_detect_wyckoff_structure_returns_none_when_secondary_test_is_stale():
+    # Append 15 weeks of flat data (not 30) to keep the SC at index 15 within the default
+    # 52-week search window, but push the ST at index 24 beyond the 26-week recency threshold.
+    # This ensures the test exercises the intended recency-check code path rather than an
+    # earlier "SC not found" rejection that would occur with a larger gap.
     rows = _wyckoff_scenario_rows() + [
-        {"Open": 125, "High": 126, "Low": 124, "Close": 125, "Volume": 400_000} for _ in range(30)
+        {"Open": 125, "High": 126, "Low": 124, "Close": 125, "Volume": 400_000} for _ in range(15)
     ]
     df = _weekly_df(rows)
 
