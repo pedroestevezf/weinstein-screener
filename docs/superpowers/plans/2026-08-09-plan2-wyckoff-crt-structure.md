@@ -674,8 +674,13 @@ def test_detect_wyckoff_structure_returns_none_without_a_climax():
 
 
 def test_detect_wyckoff_structure_returns_none_when_secondary_test_is_stale():
+    # 15 semanas planas de más (no 30): el ST queda a 30 semanas de as_of
+    # (> phase_a_recency_weeks=26, así que caduca) pero el SC (índice 15)
+    # sigue dentro de la ventana de búsqueda por defecto (52 semanas desde
+    # as_of=54), así que este test SÍ ejercita la comprobación de caducidad
+    # -- no un rechazo anterior por no encontrar el SC.
     rows = _wyckoff_scenario_rows() + [
-        {"Open": 125, "High": 126, "Low": 124, "Close": 125, "Volume": 400_000} for _ in range(30)
+        {"Open": 125, "High": 126, "Low": 124, "Close": 125, "Volume": 400_000} for _ in range(15)
     ]
     df = _weekly_df(rows)
 
