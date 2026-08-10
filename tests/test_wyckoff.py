@@ -7,6 +7,7 @@ from weinstein_screener.wyckoff import (
     find_automatic_rally,
     find_secondary_test,
     find_selling_climax_candidates,
+    find_spring,
     select_most_recent_sc,
 )
 
@@ -120,5 +121,35 @@ def test_find_secondary_test_returns_none_when_price_never_retests():
 
     ar_index = find_automatic_rally(df, sc_index=0, window=12)
     result = find_secondary_test(df, sc_index=0, ar_index=ar_index, window=12)
+
+    assert result is None
+
+
+def test_find_spring_locates_the_manipulation_week():
+    rows = _wyckoff_scenario_rows()[:36]  # hasta el Spring (índice 35) incluido
+    df = _weekly_df(rows)
+
+    result = find_spring(df, phase_b_start=24, as_of=35, sc_low=112.5)
+
+    assert result == 35
+
+
+def test_find_spring_returns_none_without_a_qualifying_week():
+    rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(15)]
+    df = _weekly_df(rows)
+
+    result = find_spring(df, phase_b_start=0, as_of=14, sc_low=95.0)
+
+    assert result is None
+
+
+def test_find_spring_ignores_a_low_that_does_not_reach_the_climax_low():
+    # Rompe el mínimo local de la Fase B, pero NO el mínimo del Selling Climax (90.0)
+    # -- no debe contar como Spring, aunque cumpla el resto de condiciones.
+    rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(5)]
+    rows.append({"Open": 97, "High": 99, "Low": 95, "Close": 98.5, "Volume": 900_000})
+    df = _weekly_df(rows)
+
+    result = find_spring(df, phase_b_start=0, as_of=5, sc_low=90.0)
 
     assert result is None

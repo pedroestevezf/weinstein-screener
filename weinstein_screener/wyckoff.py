@@ -75,3 +75,49 @@ def find_secondary_test(
         if sc_low * tol_low <= low <= sc_low * tol_high and volume < sc_volume:
             return i
     return None
+
+
+def find_spring(
+    df: pd.DataFrame,
+    phase_b_start: int,
+    as_of: int,
+    sc_low: float,
+    close_tolerance: float = 0.03,
+    close_position_min: float = 0.5,
+) -> int | None:
+    """Primera semana dentro de la Fase B que cumple los criterios de Spring.
+
+    El umbral de ruptura es `sc_low` (el mínimo del Selling Climax que marca
+    el soporte de TODA la estructura), no un mínimo más local observado
+    solo dentro de la Fase B — así el Spring barre los stops acumulados
+    bajo el soporte real de la estructura, no un mínimo circunstancial.
+
+    El volumen medio de referencia sí se calcula de forma expansiva usando
+    solo las semanas de la Fase B ANTERIORES a la semana evaluada (sin
+    look-ahead) — el volumen del propio SC no se usa aquí porque es un pico
+    atípico que distorsionaría la media.
+    """
+    for i in range(phase_b_start + 1, as_of + 1):
+        prior = df.iloc[phase_b_start:i]
+        avg_volume = prior["Volume"].mean()
+
+        low = df["Low"].iloc[i]
+        high = df["High"].iloc[i]
+        close = df["Close"].iloc[i]
+        volume = df["Volume"].iloc[i]
+
+        if low >= sc_low or volume <= avg_volume:
+            continue
+
+        candle_range = high - low
+        if candle_range == 0:
+            continue
+
+        close_position = (close - low) / candle_range
+        if close_position < close_position_min:
+            continue
+
+        if sc_low * (1 - close_tolerance) <= close <= sc_low * (1 + close_tolerance):
+            return i
+
+    return None
