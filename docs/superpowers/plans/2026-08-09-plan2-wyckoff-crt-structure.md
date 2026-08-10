@@ -103,7 +103,7 @@ def _wyckoff_scenario_rows():
     for i in range(3):
         c = 118 + i
         rows.append({"Open": c - 1, "High": c + 2, "Low": c - 2, "Close": c, "Volume": 500_000})
-    rows.append({"Open": 128, "High": 136, "Low": 127, "Close": 134, "Volume": 950_000})
+    rows.append({"Open": 138, "High": 144, "Low": 137, "Close": 141, "Volume": 950_000})
     return rows
 
 
@@ -400,14 +400,16 @@ git commit -m "feat: add Secondary Test detection"
 - Test: `tests/test_wyckoff.py`
 
 **Interfaces:**
-- Consumes: `st_index` (Task 3, usado como `phase_b_start`).
-- Produces: `find_spring(df: pd.DataFrame, phase_b_start: int, as_of: int, close_tolerance: float = 0.03, close_position_min: float = 0.5) -> int | None`.
+- Consumes: `st_index` (Task 3, usado como `phase_b_start`), `sc_low` = `df["Low"].iloc[sc_index]` (Task 1, calculado por quien orquesta — ver Task 6).
+- Produces: `find_spring(df: pd.DataFrame, phase_b_start: int, as_of: int, sc_low: float, close_tolerance: float = 0.03, close_position_min: float = 0.5) -> int | None`.
+
+**Importante — el rango de referencia del Spring es el de toda la estructura Wyckoff (SC=soporte, AR=resistencia), no solo el observado dentro de la Fase B.** En Wyckoff clásico, el Selling Climax marca el mínimo de la estructura y el Automatic Rally marca el máximo; el Spring existe precisamente para barrer los stops acumulados justo por debajo de ese mínimo del SC — no un mínimo más local que pueda haberse formado después, dentro de la propia Fase B. Por eso el umbral de ruptura del Spring se compara contra `sc_low` explícitamente, no contra el mínimo acumulado de la Fase B.
 
 Definición del Spring (acordada, revisa `2026-08-09-estrategia-weinstein-wyckoff-crt-ict-design.md` sección 5 más los ajustes de esta conversación): una semana dentro de la Fase B (desde `phase_b_start` en adelante) donde:
-1. El mínimo rompe el mínimo del rango acumulado **hasta esa semana, sin incluirla** (rango expansivo — nunca mira hacia adelante).
-2. El volumen supera la media del rango acumulado hasta esa semana (sin incluirla).
+1. El mínimo rompe **el mínimo del Selling Climax** (`Low < sc_low`).
+2. El volumen supera la media de la Fase B acumulada **hasta esa semana, sin incluirla** (rango expansivo — nunca mira hacia adelante; esta media sí usa solo la Fase B, no toda la estructura, porque el volumen del propio SC es un pico atípico que distorsionaría la media de referencia).
 3. El cierre está en la mitad superior o más del rango de su propia vela: `(Close-Low)/(High-Low) >= close_position_min`.
-4. El cierre está dentro de un ±`close_tolerance` del mínimo del rango — no hace falta que reingrese al rango, pero debe quedar cerca.
+4. El cierre está dentro de un ±`close_tolerance` de `sc_low` — no hace falta que reingrese al rango, pero debe quedar cerca del mínimo del SC.
 
 - [ ] **Step 1: Añadir los tests que fallan**
 
@@ -421,7 +423,7 @@ def test_find_spring_locates_the_manipulation_week():
     rows = _wyckoff_scenario_rows()[:36]  # hasta el Spring (índice 35) incluido
     df = _weekly_df(rows)
 
-    result = find_spring(df, phase_b_start=24, as_of=35)
+    result = find_spring(df, phase_b_start=24, as_of=35, sc_low=112.5)
 
     assert result == 35
 
@@ -430,7 +432,19 @@ def test_find_spring_returns_none_without_a_qualifying_week():
     rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(15)]
     df = _weekly_df(rows)
 
-    result = find_spring(df, phase_b_start=0, as_of=14)
+    result = find_spring(df, phase_b_start=0, as_of=14, sc_low=95.0)
+
+    assert result is None
+
+
+def test_find_spring_ignores_a_low_that_does_not_reach_the_climax_low():
+    # Rompe el mínimo local de la Fase B, pero NO el mínimo del Selling Climax (90.0)
+    # -- no debe contar como Spring, aunque cumpla el resto de condiciones.
+    rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(5)]
+    rows.append({"Open": 97, "High": 99, "Low": 95, "Close": 98.5, "Volume": 900_000})
+    df = _weekly_df(rows)
+
+    result = find_spring(df, phase_b_start=0, as_of=5, sc_low=90.0)
 
     assert result is None
 ```
@@ -452,19 +466,24 @@ def find_spring(
     df: pd.DataFrame,
     phase_b_start: int,
     as_of: int,
+    sc_low: float,
     close_tolerance: float = 0.03,
     close_position_min: float = 0.5,
 ) -> int | None:
     """Primera semana dentro de la Fase B que cumple los criterios de Spring.
 
-    El rango y el volumen medio de referencia se calculan de forma expansiva,
-    usando solo las semanas de la Fase B ANTERIORES a la semana evaluada
-    (sin look-ahead) — por eso se necesita al menos una semana previa dentro
-    de la Fase B antes de que una semana pueda calificar como Spring.
+    El umbral de ruptura es `sc_low` (el mínimo del Selling Climax que marca
+    el soporte de TODA la estructura), no un mínimo más local observado
+    solo dentro de la Fase B — así el Spring barre los stops acumulados
+    bajo el soporte real de la estructura, no un mínimo circunstancial.
+
+    El volumen medio de referencia sí se calcula de forma expansiva usando
+    solo las semanas de la Fase B ANTERIORES a la semana evaluada (sin
+    look-ahead) — el volumen del propio SC no se usa aquí porque es un pico
+    atípico que distorsionaría la media.
     """
     for i in range(phase_b_start + 1, as_of + 1):
         prior = df.iloc[phase_b_start:i]
-        range_low = prior["Low"].min()
         avg_volume = prior["Volume"].mean()
 
         low = df["Low"].iloc[i]
@@ -472,7 +491,7 @@ def find_spring(
         close = df["Close"].iloc[i]
         volume = df["Volume"].iloc[i]
 
-        if low >= range_low or volume <= avg_volume:
+        if low >= sc_low or volume <= avg_volume:
             continue
 
         candle_range = high - low
@@ -483,7 +502,7 @@ def find_spring(
         if close_position < close_position_min:
             continue
 
-        if range_low * (1 - close_tolerance) <= close <= range_low * (1 + close_tolerance):
+        if sc_low * (1 - close_tolerance) <= close <= sc_low * (1 + close_tolerance):
             return i
 
     return None
@@ -495,7 +514,7 @@ def find_spring(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `10 passed`.
+Esperado: `11 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -513,8 +532,10 @@ git commit -m "feat: add Spring (manipulation) detection"
 - Test: `tests/test_wyckoff.py`
 
 **Interfaces:**
-- Consumes: `st_index` (Task 3, usado como `phase_b_start`).
-- Produces: `find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int) -> int | None` — primera semana cuyo cierre rompe al alza la resistencia del rango (acumulada hasta esa semana, sin incluirla) con volumen superior a la media del rango hasta ese punto.
+- Consumes: `st_index` (Task 3, usado como `phase_b_start`), `ar_high` = `df["High"].iloc[ar_index]` (Task 2, calculado por quien orquesta — ver Task 6).
+- Produces: `find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high: float) -> int | None` — primera semana cuyo cierre rompe al alza **el máximo del Automatic Rally** (la resistencia real de toda la estructura), con volumen superior a la media de la Fase B hasta ese punto.
+
+**Importante — mismo criterio que en la Task 4**: el umbral de ruptura se compara contra `ar_high` (el máximo del AR, la resistencia de toda la estructura), no contra un máximo local observado solo dentro de la Fase B — de lo contrario, una consolidación estrecha dentro de la Fase B podría "romper" un techo mucho más bajo que la resistencia real, generando una señal de Distribution prematura y falsa.
 
 - [ ] **Step 1: Añadir los tests que fallan**
 
@@ -528,7 +549,7 @@ def test_find_distribution_locates_the_breakout_week():
     rows = _wyckoff_scenario_rows()  # escenario completo de 40 semanas
     df = _weekly_df(rows)
 
-    result = find_distribution(df, phase_b_start=24, as_of=39)
+    result = find_distribution(df, phase_b_start=24, as_of=39, ar_high=138.5)
 
     assert result == 39
 
@@ -537,7 +558,19 @@ def test_find_distribution_returns_none_without_a_breakout():
     rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(15)]
     df = _weekly_df(rows)
 
-    result = find_distribution(df, phase_b_start=0, as_of=14)
+    result = find_distribution(df, phase_b_start=0, as_of=14, ar_high=110.0)
+
+    assert result is None
+
+
+def test_find_distribution_ignores_a_close_that_does_not_reach_the_rally_high():
+    # Rompe el máximo local de la Fase B, pero NO el máximo del Automatic Rally (110.0)
+    # -- no debe contar como Distribution, aunque el volumen sea alto.
+    rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(5)]
+    rows.append({"Open": 101, "High": 104, "Low": 100, "Close": 103, "Volume": 900_000})
+    df = _weekly_df(rows)
+
+    result = find_distribution(df, phase_b_start=0, as_of=5, ar_high=110.0)
 
     assert result is None
 ```
@@ -555,20 +588,19 @@ Esperado: FAIL — `ImportError: cannot import name 'find_distribution'`.
 Añadir a `weinstein_screener/wyckoff.py`:
 
 ```python
-def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int) -> int | None:
-    """Primera semana cuyo cierre rompe al alza la resistencia del rango
-    (acumulada hasta esa semana, sin incluirla) con volumen por encima de
-    la media del rango hasta ese punto.
+def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high: float) -> int | None:
+    """Primera semana cuyo cierre rompe al alza `ar_high` (el máximo del
+    Automatic Rally, la resistencia de toda la estructura) con volumen por
+    encima de la media de la Fase B hasta ese punto (sin look-ahead).
     """
     for i in range(phase_b_start + 1, as_of + 1):
         prior = df.iloc[phase_b_start:i]
-        range_high = prior["High"].max()
         avg_volume = prior["Volume"].mean()
 
         close = df["Close"].iloc[i]
         volume = df["Volume"].iloc[i]
 
-        if close > range_high and volume > avg_volume:
+        if close > ar_high and volume > avg_volume:
             return i
 
     return None
@@ -580,7 +612,7 @@ def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int) -> int |
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `12 passed`.
+Esperado: `14 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -600,8 +632,10 @@ git commit -m "feat: add Distribution (breakout) detection"
 **Interfaces:**
 - Consumes: todas las funciones de las Tasks 1-5 (`find_selling_climax_candidates`, `select_most_recent_sc`, `find_automatic_rally`, `find_secondary_test`, `find_spring`, `find_distribution`).
 - Produces:
-  - `WyckoffStructure` (dataclass): `sc_index: int`, `ar_index: int`, `st_index: int`, `phase_a_weeks: int`, `phase_b_weeks: int`, `phase_b_ratio_met: bool`, `phase_b_low: float`, `phase_b_high: float`, `spring_index: int | None`, `distribution_index: int | None`.
+  - `WyckoffStructure` (dataclass): `sc_index: int`, `ar_index: int`, `st_index: int`, `phase_a_weeks: int`, `phase_b_weeks: int`, `phase_b_ratio_met: bool`, `range_low: float`, `range_high: float`, `spring_index: int | None`, `distribution_index: int | None`.
   - `detect_wyckoff_structure(df_weekly: pd.DataFrame, as_of: int | None = None, range_lookback: int = 10, volume_lookback: int = 12, volume_percentile: float = 80, range_multiplier: float = 2.0, new_low_lookback: int = 10, sc_search_window: int = 52, ar_window: int = 12, st_window: int = 12, st_tol_low: float = 0.98, st_tol_high: float = 1.10, phase_a_recency_weeks: int = 26, phase_b_ratio: float = 1.5, spring_close_tolerance: float = 0.03, spring_close_position_min: float = 0.5) -> WyckoffStructure | None`. Devuelve `None` si no hay SC, AR o ST encontrados, o si el ST no está dentro de `phase_a_recency_weeks` respecto a `as_of`. Si `as_of` es `None`, usa la última semana del DataFrame.
+
+**Nota sobre `range_low`/`range_high`**: representan el rango de **toda la estructura Wyckoff**, no solo de la Fase B — `range_low = sc_low` (el mínimo del Selling Climax, el soporte real) y `range_high = ar_high` (el máximo del Automatic Rally, la resistencia real). Es el mismo rango que usan internamente `find_spring` y `find_distribution` (Tasks 4 y 5) para sus umbrales de ruptura — se exponen aquí para que capas posteriores (ICT, la app Streamlit) puedan dibujar y razonar sobre el mismo rango, en vez de recalcularlo por su cuenta.
 
 - [ ] **Step 1: Añadir los tests que fallan**
 
@@ -624,8 +658,8 @@ def test_detect_wyckoff_structure_finds_the_full_pattern():
     assert result.phase_a_weeks == 9
     assert result.phase_b_weeks == 15
     assert result.phase_b_ratio_met is True
-    assert result.phase_b_low == pytest.approx(108.0)
-    assert result.phase_b_high == pytest.approx(136.0)
+    assert result.range_low == pytest.approx(112.5)
+    assert result.range_high == pytest.approx(138.5)
     assert result.spring_index == 35
     assert result.distribution_index == 39
 
@@ -671,8 +705,8 @@ class WyckoffStructure:
     phase_a_weeks: int
     phase_b_weeks: int
     phase_b_ratio_met: bool
-    phase_b_low: float
-    phase_b_high: float
+    range_low: float
+    range_high: float
     spring_index: int | None
     distribution_index: int | None
 
@@ -726,12 +760,16 @@ def detect_wyckoff_structure(
     phase_b_weeks = as_of - st_index
     phase_b_ratio_met = phase_b_weeks >= phase_b_ratio * phase_a_weeks
 
-    phase_b_slice = df_weekly.iloc[st_index : as_of + 1]
-    phase_b_low = phase_b_slice["Low"].min()
-    phase_b_high = phase_b_slice["High"].max()
+    # El rango de referencia es el de TODA la estructura (SC=soporte, AR=resistencia),
+    # no un rango más local observado solo dentro de la Fase B — ver la nota en la
+    # Task 4 y la Task 5 sobre por qué esto importa para el Spring y la Distribution.
+    range_low = df_weekly["Low"].iloc[sc_index]
+    range_high = df_weekly["High"].iloc[ar_index]
 
-    spring_index = find_spring(df_weekly, st_index, as_of, spring_close_tolerance, spring_close_position_min)
-    distribution_index = find_distribution(df_weekly, st_index, as_of)
+    spring_index = find_spring(
+        df_weekly, st_index, as_of, range_low, spring_close_tolerance, spring_close_position_min
+    )
+    distribution_index = find_distribution(df_weekly, st_index, as_of, range_high)
 
     return WyckoffStructure(
         sc_index=sc_index,
@@ -740,8 +778,8 @@ def detect_wyckoff_structure(
         phase_a_weeks=phase_a_weeks,
         phase_b_weeks=phase_b_weeks,
         phase_b_ratio_met=phase_b_ratio_met,
-        phase_b_low=phase_b_low,
-        phase_b_high=phase_b_high,
+        range_low=range_low,
+        range_high=range_high,
         spring_index=spring_index,
         distribution_index=distribution_index,
     )
@@ -753,7 +791,7 @@ def detect_wyckoff_structure(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `15 passed`.
+Esperado: `17 passed`.
 
 - [ ] **Step 5: Ejecutar toda la suite de tests del proyecto**
 
@@ -761,7 +799,7 @@ Esperado: `15 passed`.
 pytest -v
 ```
 
-Esperado: `35 passed` (20 del Plan 1 + 15 de este plan).
+Esperado: `37 passed` (20 del Plan 1 + 17 de este plan).
 
 - [ ] **Step 6: Commit**
 
