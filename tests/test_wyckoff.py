@@ -3,7 +3,7 @@ import math
 import pandas as pd
 import pytest
 
-from weinstein_screener.wyckoff import find_selling_climax_candidates, select_most_recent_sc
+from weinstein_screener.wyckoff import find_automatic_rally, find_selling_climax_candidates, select_most_recent_sc
 
 
 def _weekly_df(rows):
@@ -76,5 +76,23 @@ def test_select_most_recent_sc_returns_none_when_no_candidate():
     candidates = find_selling_climax_candidates(df)
 
     result = select_most_recent_sc(candidates, as_of=29, search_window=52)
+
+    assert result is None
+
+
+def test_find_automatic_rally_locates_the_rally_peak():
+    rows = _wyckoff_scenario_rows()[:21]  # hasta el AR (índice 20) incluido
+    df = _weekly_df(rows)
+
+    result = find_automatic_rally(df, sc_index=15, window=12)
+
+    assert result == 20
+
+
+def test_find_automatic_rally_returns_none_when_sc_is_the_last_row():
+    rows = [{"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 500_000} for _ in range(10)]
+    df = _weekly_df(rows)
+
+    result = find_automatic_rally(df, sc_index=9, window=12)
 
     assert result is None

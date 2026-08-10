@@ -42,3 +42,12 @@ def select_most_recent_sc(candidates: pd.Series, as_of: int, search_window: int 
     if len(true_positions) == 0:
         return None
     return candidates.index.get_loc(true_positions[-1])
+
+
+def find_automatic_rally(df: pd.DataFrame, sc_index: int, window: int = 12) -> int | None:
+    """Posición del máximo (High) más alto en las `window` semanas siguientes a `sc_index`."""
+    end = min(len(df), sc_index + 1 + window)
+    segment = df["High"].iloc[sc_index + 1 : end]
+    if segment.empty:
+        return None
+    return int(segment.values.argmax()) + sc_index + 1
