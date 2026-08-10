@@ -144,6 +144,21 @@ def test_select_most_recent_sc_returns_none_when_no_candidate():
     result = select_most_recent_sc(candidates, as_of=29, search_window=52)
 
     assert result is None
+
+
+def test_select_most_recent_sc_handles_a_duplicate_index():
+    # select_most_recent_sc usa aritmética posicional, no
+    # `.index.get_loc(...)`, precisamente para no romperse si el índice
+    # del DataFrame tuviera timestamps duplicados.
+    rows = _wyckoff_scenario_rows()
+    df = _weekly_df(rows)
+    candidates = find_selling_climax_candidates(df)
+    candidates.index = pd.Index([candidates.index[0]] * len(candidates))
+
+    result = select_most_recent_sc(candidates, as_of=len(df) - 1, search_window=52)
+
+    assert result == 15
+    assert isinstance(result, int)
 ```
 
 - [ ] **Step 2: Ejecutar los tests y comprobar que fallan**
@@ -217,7 +232,7 @@ def select_most_recent_sc(candidates: pd.Series, as_of: int, search_window: int 
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `4 passed`.
+Esperado: `5 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -315,7 +330,7 @@ def find_automatic_rally(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `7 passed`.
+Esperado: `8 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -430,7 +445,7 @@ def find_secondary_test(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `10 passed`.
+Esperado: `11 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -562,7 +577,7 @@ def find_spring(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `13 passed`.
+Esperado: `14 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -660,7 +675,7 @@ def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high:
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `16 passed`.
+Esperado: `17 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -807,8 +822,7 @@ def detect_wyckoff_structure(
     no está vigente (más antiguo que `phase_a_recency_weeks` respecto a
     `as_of`).
     """
-    if as_of is None:
-        as_of = len(df_weekly) - 1
+    as_of = len(df_weekly) - 1 if as_of is None else min(as_of, len(df_weekly) - 1)
 
     candidates = find_selling_climax_candidates(
         df_weekly, range_lookback, volume_lookback, volume_percentile, range_multiplier, new_low_lookback
@@ -863,7 +877,7 @@ def detect_wyckoff_structure(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `20 passed`.
+Esperado: `21 passed`.
 
 - [ ] **Step 5: Ejecutar toda la suite de tests del proyecto**
 
@@ -871,7 +885,7 @@ Esperado: `20 passed`.
 pytest -v
 ```
 
-Esperado: `40 passed` (20 del Plan 1 + 20 de este plan).
+Esperado: `41 passed` (20 del Plan 1 + 21 de este plan).
 
 - [ ] **Step 6: Commit**
 
