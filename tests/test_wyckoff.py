@@ -88,6 +88,18 @@ def test_select_most_recent_sc_returns_none_when_no_candidate():
     assert result is None
 
 
+def test_select_most_recent_sc_handles_a_duplicate_index():
+    rows = _wyckoff_scenario_rows()
+    df = _weekly_df(rows)
+    candidates = find_selling_climax_candidates(df)
+    candidates.index = pd.Index([candidates.index[0]] * len(candidates))
+
+    result = select_most_recent_sc(candidates, as_of=len(df) - 1, search_window=52)
+
+    assert result == 15
+    assert isinstance(result, int)
+
+
 def test_find_automatic_rally_locates_the_rally_peak():
     rows = _wyckoff_scenario_rows()[:21]  # hasta el AR (índice 20) incluido
     df = _weekly_df(rows)

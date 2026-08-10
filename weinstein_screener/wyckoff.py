@@ -200,8 +200,7 @@ def detect_wyckoff_structure(
     no está vigente (más antiguo que `phase_a_recency_weeks` respecto a
     `as_of`).
     """
-    if as_of is None:
-        as_of = len(df_weekly) - 1
+    as_of = len(df_weekly) - 1 if as_of is None else min(as_of, len(df_weekly) - 1)
 
     candidates = find_selling_climax_candidates(
         df_weekly, range_lookback, volume_lookback, volume_percentile, range_multiplier, new_low_lookback
