@@ -121,3 +121,21 @@ def find_spring(
             return i
 
     return None
+
+
+def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high: float) -> int | None:
+    """Primera semana cuyo cierre rompe al alza `ar_high` (el máximo del
+    Automatic Rally, la resistencia de toda la estructura) con volumen por
+    encima de la media de la Fase B hasta ese punto (sin look-ahead).
+    """
+    for i in range(phase_b_start + 1, as_of + 1):
+        prior = df.iloc[phase_b_start:i]
+        avg_volume = prior["Volume"].mean()
+
+        close = df["Close"].iloc[i]
+        volume = df["Volume"].iloc[i]
+
+        if close > ar_high and volume > avg_volume:
+            return i
+
+    return None
