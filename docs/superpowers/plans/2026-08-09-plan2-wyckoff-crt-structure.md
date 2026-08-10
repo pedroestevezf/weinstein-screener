@@ -197,13 +197,18 @@ def find_selling_climax_candidates(
 def select_most_recent_sc(candidates: pd.Series, as_of: int, search_window: int = 52) -> int | None:
     """Posición entera del candidato a SC más reciente dentro de la ventana
     `[as_of - search_window + 1, as_of]`, o None si no hay ninguno.
+
+    Usa aritmética posicional en vez de convertir a etiquetas del índice y
+    volver con `.index.get_loc(...)` — ese ida y vuelta por etiqueta se
+    rompe silenciosamente (devuelve un `slice` en vez de un entero) si el
+    índice del DataFrame tuviera timestamps duplicados.
     """
     start = max(0, as_of - search_window + 1)
-    window = candidates.iloc[start : as_of + 1]
-    true_positions = window[window].index
-    if len(true_positions) == 0:
+    window = candidates.iloc[start : as_of + 1].to_numpy()
+    hits = np.flatnonzero(window)
+    if hits.size == 0:
         return None
-    return candidates.index.get_loc(true_positions[-1])
+    return start + int(hits[-1])
 ```
 
 - [ ] **Step 4: Ejecutar los tests y comprobar que pasan**
@@ -231,7 +236,9 @@ git commit -m "feat: add Selling Climax detection and selection"
 
 **Interfaces:**
 - Consumes: nada directamente (recibe `sc_index` ya calculado por `select_most_recent_sc` de Task 1).
-- Produces: `find_automatic_rally(df: pd.DataFrame, sc_index: int, window: int = 12) -> int | None` — posición del máximo (`High`) más alto en las `window` semanas siguientes a `sc_index`, o `None` si no quedan semanas tras `sc_index`.
+- Produces: `find_automatic_rally(df: pd.DataFrame, sc_index: int, window: int = 12, as_of: int | None = None) -> int | None` — posición del máximo (`High`) más alto en las `window` semanas siguientes a `sc_index`, o `None` si no quedan semanas tras `sc_index`.
+
+**Importante — `as_of` acota la búsqueda, no solo `len(df)`.** El sistema se usará tanto para cribado en vivo (donde `as_of` suele ser la última fila) como para backtest (donde se llamará con distintos valores de `as_of` sobre el mismo DataFrame completo, sin truncarlo en cada paso). Si la búsqueda solo se limita a `len(df)`, un `as_of` anterior al final del DataFrame no impide que la función mire semanas posteriores a `as_of` — eso es mirar al futuro, exactamente lo que la restricción global de "sin look-ahead" prohíbe. Por eso `as_of` es un parámetro explícito aquí (y en la Task 3), no solo en el orquestador.
 
 - [ ] **Step 1: Añadir los tests que fallan**
 
@@ -257,6 +264,19 @@ def test_find_automatic_rally_returns_none_when_sc_is_the_last_row():
     result = find_automatic_rally(df, sc_index=9, window=12)
 
     assert result is None
+
+
+def test_find_automatic_rally_ignores_weeks_after_as_of():
+    # Sin as_of, el máximo real está en el índice 20 (High=138.5). Con
+    # as_of=18, la búsqueda no debe mirar más allá de la semana 18 aunque
+    # el DataFrame completo tenga más filas -- el máximo dentro de
+    # [16, 18] es el propio índice 18 (High=132.5).
+    rows = _wyckoff_scenario_rows()[:21]
+    df = _weekly_df(rows)
+
+    result = find_automatic_rally(df, sc_index=15, window=12, as_of=18)
+
+    assert result == 18
 ```
 
 - [ ] **Step 2: Ejecutar los tests y comprobar que fallan**
@@ -272,9 +292,17 @@ Esperado: FAIL — `ImportError: cannot import name 'find_automatic_rally'`.
 Añadir a `weinstein_screener/wyckoff.py`:
 
 ```python
-def find_automatic_rally(df: pd.DataFrame, sc_index: int, window: int = 12) -> int | None:
-    """Posición del máximo (High) más alto en las `window` semanas siguientes a `sc_index`."""
-    end = min(len(df), sc_index + 1 + window)
+def find_automatic_rally(
+    df: pd.DataFrame, sc_index: int, window: int = 12, as_of: int | None = None
+) -> int | None:
+    """Posición del máximo (High) más alto en las `window` semanas siguientes a `sc_index`.
+
+    `as_of` acota la búsqueda para que nunca mire semanas posteriores a
+    `as_of` (uso en backtest sobre un DataFrame completo sin truncar). Si
+    `as_of` es None, se usa la última fila del DataFrame.
+    """
+    limit = len(df) - 1 if as_of is None else min(as_of, len(df) - 1)
+    end = min(limit + 1, sc_index + 1 + window)
     segment = df["High"].iloc[sc_index + 1 : end]
     if segment.empty:
         return None
@@ -287,7 +315,7 @@ def find_automatic_rally(df: pd.DataFrame, sc_index: int, window: int = 12) -> i
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `6 passed`.
+Esperado: `7 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -306,7 +334,9 @@ git commit -m "feat: add Automatic Rally detection"
 
 **Interfaces:**
 - Consumes: `sc_index` (Task 1), `ar_index` (Task 2).
-- Produces: `find_secondary_test(df: pd.DataFrame, sc_index: int, ar_index: int, window: int = 12, tol_low: float = 0.98, tol_high: float = 1.10) -> int | None` — primera semana, dentro de las `window` semanas tras `ar_index`, cuyo mínimo retesta la zona `[SC_low * tol_low, SC_low * tol_high]` con volumen menor que el del SC.
+- Produces: `find_secondary_test(df: pd.DataFrame, sc_index: int, ar_index: int, window: int = 12, tol_low: float = 0.98, tol_high: float = 1.10, as_of: int | None = None) -> int | None` — primera semana, dentro de las `window` semanas tras `ar_index`, cuyo mínimo retesta la zona `[SC_low * tol_low, SC_low * tol_high]` con volumen menor que el del SC.
+
+**Mismo motivo que en la Task 2**: `as_of` acota la búsqueda para que nunca mire semanas posteriores a `as_of`, no solo `len(df)` — necesario tanto para el cribado en vivo como para el backtest sobre un DataFrame completo sin truncar.
 
 - [ ] **Step 1: Añadir los tests que fallan**
 
@@ -335,6 +365,18 @@ def test_find_secondary_test_returns_none_when_price_never_retests():
     result = find_secondary_test(df, sc_index=0, ar_index=ar_index, window=12)
 
     assert result is None
+
+
+def test_find_secondary_test_ignores_weeks_after_as_of():
+    # El ST real está en el índice 24. Con as_of=22 (antes de esa semana),
+    # la búsqueda no debe encontrarlo -- ninguna semana en [21, 22] retesta
+    # la zona del mínimo del SC.
+    rows = _wyckoff_scenario_rows()[:25]
+    df = _weekly_df(rows)
+
+    result = find_secondary_test(df, sc_index=15, ar_index=20, window=12, as_of=22)
+
+    assert result is None
 ```
 
 (añadir `find_automatic_rally` al `import` de `weinstein_screener.wyckoff` ya existente en el archivo de test, si no está ya)
@@ -359,14 +401,20 @@ def find_secondary_test(
     window: int = 12,
     tol_low: float = 0.98,
     tol_high: float = 1.10,
+    as_of: int | None = None,
 ) -> int | None:
     """Primera semana, tras `ar_index` y dentro de `window` semanas, cuyo mínimo
     retesta la zona del mínimo del SC (`[SC_low*tol_low, SC_low*tol_high]`) con
     volumen menor que el del SC.
+
+    `as_of` acota la búsqueda para que nunca mire semanas posteriores a
+    `as_of` (uso en backtest sobre un DataFrame completo sin truncar). Si
+    `as_of` es None, se usa la última fila del DataFrame.
     """
     sc_low = df["Low"].iloc[sc_index]
     sc_volume = df["Volume"].iloc[sc_index]
-    end = min(len(df), ar_index + 1 + window)
+    limit = len(df) - 1 if as_of is None else min(as_of, len(df) - 1)
+    end = min(limit + 1, ar_index + 1 + window)
 
     for i in range(ar_index + 1, end):
         low = df["Low"].iloc[i]
@@ -382,7 +430,7 @@ def find_secondary_test(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `8 passed`.
+Esperado: `10 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -514,7 +562,7 @@ def find_spring(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `11 passed`.
+Esperado: `13 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -612,7 +660,7 @@ def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high:
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `14 passed`.
+Esperado: `16 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -636,6 +684,10 @@ git commit -m "feat: add Distribution (breakout) detection"
   - `detect_wyckoff_structure(df_weekly: pd.DataFrame, as_of: int | None = None, range_lookback: int = 10, volume_lookback: int = 12, volume_percentile: float = 80, range_multiplier: float = 2.0, new_low_lookback: int = 10, sc_search_window: int = 52, ar_window: int = 12, st_window: int = 12, st_tol_low: float = 0.98, st_tol_high: float = 1.10, phase_a_recency_weeks: int = 26, phase_b_ratio: float = 1.5, spring_close_tolerance: float = 0.03, spring_close_position_min: float = 0.5) -> WyckoffStructure | None`. Devuelve `None` si no hay SC, AR o ST encontrados, o si el ST no está dentro de `phase_a_recency_weeks` respecto a `as_of`. Si `as_of` es `None`, usa la última semana del DataFrame.
 
 **Nota sobre `range_low`/`range_high`**: representan el rango de **toda la estructura Wyckoff**, no solo de la Fase B — `range_low = sc_low` (el mínimo del Selling Climax, el soporte real) y `range_high = ar_high` (el máximo del Automatic Rally, la resistencia real). Es el mismo rango que usan internamente `find_spring` y `find_distribution` (Tasks 4 y 5) para sus umbrales de ruptura — se exponen aquí para que capas posteriores (ICT, la app Streamlit) puedan dibujar y razonar sobre el mismo rango, en vez de recalcularlo por su cuenta.
+
+**Nota sobre `phase_b_ratio_met`**: es **informativo, no un filtro que la función aplique por su cuenta**. La función devuelve una estructura siempre que encuentre SC/AR/ST vigentes, se cumpla o no el ratio 1.5x — porque ese ratio está marcado como "a validar en backtest" (sección 8 del documento de diseño) y debe poder analizarse con y sin el filtro aplicado, no quedar hardcodeado como condición de corte dentro de la detección. Quien consuma `WyckoffStructure` decide si actúa sobre estructuras con `phase_b_ratio_met=False`.
+
+**Importante — `as_of` debe propagarse a `find_automatic_rally` y `find_secondary_test`, no solo usarse para el chequeo de vigencia y para `find_spring`/`find_distribution`.** Ambas funciones (Tasks 2 y 3) aceptan ahora un parámetro `as_of` explícito precisamente para que el orquestador se lo pase — si no se propaga, esas dos funciones seguirían buscando hasta `len(df_weekly)`, lo que permite que la estructura detectada incluya semanas posteriores a `as_of` (mirar al futuro) cuando se llama con un `as_of` distinto a la última fila del DataFrame, exactamente el escenario de un backtest sobre el DataFrame completo sin truncar.
 
 - [ ] **Step 1: Añadir los tests que fallan**
 
@@ -687,6 +739,21 @@ def test_detect_wyckoff_structure_returns_none_when_secondary_test_is_stale():
     result = detect_wyckoff_structure(df)
 
     assert result is None
+
+
+def test_detect_wyckoff_structure_never_looks_past_as_of():
+    # Propiedad: para cualquier as_of, el resultado con el DataFrame completo
+    # (pasando as_of) debe ser idéntico al resultado truncando el DataFrame
+    # en ese mismo punto. Si alguna función interna mira más allá de as_of,
+    # esta prueba lo detecta para el punto exacto donde ocurre.
+    rows = _wyckoff_scenario_rows()
+    df = _weekly_df(rows)
+
+    for k in range(len(df)):
+        result_with_as_of = detect_wyckoff_structure(df, as_of=k)
+        result_truncated = detect_wyckoff_structure(df.iloc[: k + 1])
+
+        assert result_with_as_of == result_truncated, f"mismatch at as_of={k}"
 ```
 
 - [ ] **Step 2: Ejecutar los tests y comprobar que fallan**
@@ -709,9 +776,9 @@ class WyckoffStructure:
     st_index: int
     phase_a_weeks: int
     phase_b_weeks: int
-    phase_b_ratio_met: bool
-    range_low: float
-    range_high: float
+    phase_b_ratio_met: bool  # informativo -- no aplicado como filtro, ver nota en la Task 6 del plan
+    range_low: float  # = mínimo del Selling Climax (soporte real). NUNCA un mínimo local de la Fase B.
+    range_high: float  # = máximo del Automatic Rally (resistencia real). NUNCA un máximo local de la Fase B.
     spring_index: int | None
     distribution_index: int | None
 
@@ -750,11 +817,11 @@ def detect_wyckoff_structure(
     if sc_index is None:
         return None
 
-    ar_index = find_automatic_rally(df_weekly, sc_index, ar_window)
+    ar_index = find_automatic_rally(df_weekly, sc_index, ar_window, as_of)
     if ar_index is None:
         return None
 
-    st_index = find_secondary_test(df_weekly, sc_index, ar_index, st_window, st_tol_low, st_tol_high)
+    st_index = find_secondary_test(df_weekly, sc_index, ar_index, st_window, st_tol_low, st_tol_high, as_of)
     if st_index is None:
         return None
 
@@ -796,7 +863,7 @@ def detect_wyckoff_structure(
 pytest tests/test_wyckoff.py -v
 ```
 
-Esperado: `17 passed`.
+Esperado: `20 passed`.
 
 - [ ] **Step 5: Ejecutar toda la suite de tests del proyecto**
 
@@ -804,7 +871,7 @@ Esperado: `17 passed`.
 pytest -v
 ```
 
-Esperado: `37 passed` (20 del Plan 1 + 17 de este plan).
+Esperado: `40 passed` (20 del Plan 1 + 20 de este plan).
 
 - [ ] **Step 6: Commit**
 
