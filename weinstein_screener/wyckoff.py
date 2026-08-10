@@ -51,3 +51,27 @@ def find_automatic_rally(df: pd.DataFrame, sc_index: int, window: int = 12) -> i
     if segment.empty:
         return None
     return int(segment.values.argmax()) + sc_index + 1
+
+
+def find_secondary_test(
+    df: pd.DataFrame,
+    sc_index: int,
+    ar_index: int,
+    window: int = 12,
+    tol_low: float = 0.98,
+    tol_high: float = 1.10,
+) -> int | None:
+    """Primera semana, tras `ar_index` y dentro de `window` semanas, cuyo mínimo
+    retesta la zona del mínimo del SC (`[SC_low*tol_low, SC_low*tol_high]`) con
+    volumen menor que el del SC.
+    """
+    sc_low = df["Low"].iloc[sc_index]
+    sc_volume = df["Volume"].iloc[sc_index]
+    end = min(len(df), ar_index + 1 + window)
+
+    for i in range(ar_index + 1, end):
+        low = df["Low"].iloc[i]
+        volume = df["Volume"].iloc[i]
+        if sc_low * tol_low <= low <= sc_low * tol_high and volume < sc_volume:
+            return i
+    return None

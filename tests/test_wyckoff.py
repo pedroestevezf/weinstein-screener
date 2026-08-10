@@ -3,7 +3,12 @@ import math
 import pandas as pd
 import pytest
 
-from weinstein_screener.wyckoff import find_automatic_rally, find_selling_climax_candidates, select_most_recent_sc
+from weinstein_screener.wyckoff import (
+    find_automatic_rally,
+    find_secondary_test,
+    find_selling_climax_candidates,
+    select_most_recent_sc,
+)
 
 
 def _weekly_df(rows):
@@ -94,5 +99,26 @@ def test_find_automatic_rally_returns_none_when_sc_is_the_last_row():
     df = _weekly_df(rows)
 
     result = find_automatic_rally(df, sc_index=9, window=12)
+
+    assert result is None
+
+
+def test_find_secondary_test_locates_the_retest():
+    rows = _wyckoff_scenario_rows()[:25]  # hasta el ST (índice 24) incluido
+    df = _weekly_df(rows)
+
+    result = find_secondary_test(df, sc_index=15, ar_index=20, window=12)
+
+    assert result == 24
+
+
+def test_find_secondary_test_returns_none_when_price_never_retests():
+    rows = [{"Open": 100, "High": 101, "Low": 90, "Close": 95, "Volume": 2_000_000}]  # SC en índice 0
+    for i in range(15):
+        rows.append({"Open": 150 + i, "High": 152 + i, "Low": 149 + i, "Close": 151 + i, "Volume": 400_000})
+    df = _weekly_df(rows)
+
+    ar_index = find_automatic_rally(df, sc_index=0, window=12)
+    result = find_secondary_test(df, sc_index=0, ar_index=ar_index, window=12)
 
     assert result is None
