@@ -11,6 +11,7 @@ from weinstein_screener.wyckoff import (
     find_spring,
     select_most_recent_sc,
 )
+from weinstein_screener.wyckoff import detect_wyckoff_structure
 
 
 def _weekly_df(rows):
@@ -182,5 +183,44 @@ def test_find_distribution_ignores_a_close_that_does_not_reach_the_rally_high():
     df = _weekly_df(rows)
 
     result = find_distribution(df, phase_b_start=0, as_of=5, ar_high=110.0)
+
+    assert result is None
+
+
+def test_detect_wyckoff_structure_finds_the_full_pattern():
+    rows = _wyckoff_scenario_rows()
+    df = _weekly_df(rows)
+
+    result = detect_wyckoff_structure(df)
+
+    assert result is not None
+    assert result.sc_index == 15
+    assert result.ar_index == 20
+    assert result.st_index == 24
+    assert result.phase_a_weeks == 9
+    assert result.phase_b_weeks == 15
+    assert result.phase_b_ratio_met is True
+    assert result.range_low == pytest.approx(112.5)
+    assert result.range_high == pytest.approx(138.5)
+    assert result.spring_index == 35
+    assert result.distribution_index == 39
+
+
+def test_detect_wyckoff_structure_returns_none_without_a_climax():
+    rows = [{"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 500_000} for _ in range(40)]
+    df = _weekly_df(rows)
+
+    result = detect_wyckoff_structure(df)
+
+    assert result is None
+
+
+def test_detect_wyckoff_structure_returns_none_when_secondary_test_is_stale():
+    rows = _wyckoff_scenario_rows() + [
+        {"Open": 125, "High": 126, "Low": 124, "Close": 125, "Volume": 400_000} for _ in range(30)
+    ]
+    df = _weekly_df(rows)
+
+    result = detect_wyckoff_structure(df)
 
     assert result is None

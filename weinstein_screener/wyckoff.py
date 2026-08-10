@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
@@ -139,3 +141,91 @@ def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high:
             return i
 
     return None
+
+
+@dataclass
+class WyckoffStructure:
+    sc_index: int
+    ar_index: int
+    st_index: int
+    phase_a_weeks: int
+    phase_b_weeks: int
+    phase_b_ratio_met: bool
+    range_low: float
+    range_high: float
+    spring_index: int | None
+    distribution_index: int | None
+
+
+def detect_wyckoff_structure(
+    df_weekly: pd.DataFrame,
+    as_of: int | None = None,
+    range_lookback: int = 10,
+    volume_lookback: int = 12,
+    volume_percentile: float = 80,
+    range_multiplier: float = 2.0,
+    new_low_lookback: int = 10,
+    sc_search_window: int = 52,
+    ar_window: int = 12,
+    st_window: int = 12,
+    st_tol_low: float = 0.98,
+    st_tol_high: float = 1.10,
+    phase_a_recency_weeks: int = 26,
+    phase_b_ratio: float = 1.5,
+    spring_close_tolerance: float = 0.03,
+    spring_close_position_min: float = 0.5,
+) -> WyckoffStructure | None:
+    """Detecta la estructura Wyckoff/CRT más reciente y vigente en `df_weekly`.
+
+    Devuelve None si no se encuentra SC, AR o ST, o si el ST encontrado ya
+    no está vigente (más antiguo que `phase_a_recency_weeks` respecto a
+    `as_of`).
+    """
+    if as_of is None:
+        as_of = len(df_weekly) - 1
+
+    candidates = find_selling_climax_candidates(
+        df_weekly, range_lookback, volume_lookback, volume_percentile, range_multiplier, new_low_lookback
+    )
+    sc_index = select_most_recent_sc(candidates, as_of, sc_search_window)
+    if sc_index is None:
+        return None
+
+    ar_index = find_automatic_rally(df_weekly, sc_index, ar_window)
+    if ar_index is None:
+        return None
+
+    st_index = find_secondary_test(df_weekly, sc_index, ar_index, st_window, st_tol_low, st_tol_high)
+    if st_index is None:
+        return None
+
+    if (as_of - st_index) > phase_a_recency_weeks:
+        return None
+
+    phase_a_weeks = st_index - sc_index
+    phase_b_weeks = as_of - st_index
+    phase_b_ratio_met = phase_b_weeks >= phase_b_ratio * phase_a_weeks
+
+    # El rango de referencia es el de TODA la estructura (SC=soporte, AR=resistencia),
+    # no un rango más local observado solo dentro de la Fase B — ver la nota en la
+    # Task 4 y la Task 5 sobre por qué esto importa para el Spring y la Distribution.
+    range_low = df_weekly["Low"].iloc[sc_index]
+    range_high = df_weekly["High"].iloc[ar_index]
+
+    spring_index = find_spring(
+        df_weekly, st_index, as_of, range_low, spring_close_tolerance, spring_close_position_min
+    )
+    distribution_index = find_distribution(df_weekly, st_index, as_of, range_high)
+
+    return WyckoffStructure(
+        sc_index=sc_index,
+        ar_index=ar_index,
+        st_index=st_index,
+        phase_a_weeks=phase_a_weeks,
+        phase_b_weeks=phase_b_weeks,
+        phase_b_ratio_met=phase_b_ratio_met,
+        range_low=range_low,
+        range_high=range_high,
+        spring_index=spring_index,
+        distribution_index=distribution_index,
+    )
