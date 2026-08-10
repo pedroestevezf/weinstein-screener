@@ -37,18 +37,31 @@ def find_selling_climax_candidates(
 def select_most_recent_sc(candidates: pd.Series, as_of: int, search_window: int = 52) -> int | None:
     """Posición entera del candidato a SC más reciente dentro de la ventana
     `[as_of - search_window + 1, as_of]`, o None si no hay ninguno.
+
+    Usa aritmética posicional en vez de convertir a etiquetas del índice y
+    volver con `.index.get_loc(...)` — ese ida y vuelta por etiqueta se
+    rompe silenciosamente (devuelve un `slice` en vez de un entero) si el
+    índice del DataFrame tuviera timestamps duplicados.
     """
     start = max(0, as_of - search_window + 1)
-    window = candidates.iloc[start : as_of + 1]
-    true_positions = window[window].index
-    if len(true_positions) == 0:
+    window = candidates.iloc[start : as_of + 1].to_numpy()
+    hits = np.flatnonzero(window)
+    if hits.size == 0:
         return None
-    return candidates.index.get_loc(true_positions[-1])
+    return start + int(hits[-1])
 
 
-def find_automatic_rally(df: pd.DataFrame, sc_index: int, window: int = 12) -> int | None:
-    """Posición del máximo (High) más alto en las `window` semanas siguientes a `sc_index`."""
-    end = min(len(df), sc_index + 1 + window)
+def find_automatic_rally(
+    df: pd.DataFrame, sc_index: int, window: int = 12, as_of: int | None = None
+) -> int | None:
+    """Posición del máximo (High) más alto en las `window` semanas siguientes a `sc_index`.
+
+    `as_of` acota la búsqueda para que nunca mire semanas posteriores a
+    `as_of` (uso en backtest sobre un DataFrame completo sin truncar). Si
+    `as_of` es None, se usa la última fila del DataFrame.
+    """
+    limit = len(df) - 1 if as_of is None else min(as_of, len(df) - 1)
+    end = min(limit + 1, sc_index + 1 + window)
     segment = df["High"].iloc[sc_index + 1 : end]
     if segment.empty:
         return None
@@ -62,14 +75,20 @@ def find_secondary_test(
     window: int = 12,
     tol_low: float = 0.98,
     tol_high: float = 1.10,
+    as_of: int | None = None,
 ) -> int | None:
     """Primera semana, tras `ar_index` y dentro de `window` semanas, cuyo mínimo
     retesta la zona del mínimo del SC (`[SC_low*tol_low, SC_low*tol_high]`) con
     volumen menor que el del SC.
+
+    `as_of` acota la búsqueda para que nunca mire semanas posteriores a
+    `as_of` (uso en backtest sobre un DataFrame completo sin truncar). Si
+    `as_of` es None, se usa la última fila del DataFrame.
     """
     sc_low = df["Low"].iloc[sc_index]
     sc_volume = df["Volume"].iloc[sc_index]
-    end = min(len(df), ar_index + 1 + window)
+    limit = len(df) - 1 if as_of is None else min(as_of, len(df) - 1)
+    end = min(limit + 1, ar_index + 1 + window)
 
     for i in range(ar_index + 1, end):
         low = df["Low"].iloc[i]
@@ -150,9 +169,9 @@ class WyckoffStructure:
     st_index: int
     phase_a_weeks: int
     phase_b_weeks: int
-    phase_b_ratio_met: bool
-    range_low: float
-    range_high: float
+    phase_b_ratio_met: bool  # informativo -- no aplicado como filtro por detect_wyckoff_structure
+    range_low: float  # = mínimo del Selling Climax (soporte real). NUNCA un mínimo local de la Fase B.
+    range_high: float  # = máximo del Automatic Rally (resistencia real). NUNCA un máximo local de la Fase B.
     spring_index: int | None
     distribution_index: int | None
 
@@ -191,11 +210,11 @@ def detect_wyckoff_structure(
     if sc_index is None:
         return None
 
-    ar_index = find_automatic_rally(df_weekly, sc_index, ar_window)
+    ar_index = find_automatic_rally(df_weekly, sc_index, ar_window, as_of)
     if ar_index is None:
         return None
 
-    st_index = find_secondary_test(df_weekly, sc_index, ar_index, st_window, st_tol_low, st_tol_high)
+    st_index = find_secondary_test(df_weekly, sc_index, ar_index, st_window, st_tol_low, st_tol_high, as_of)
     if st_index is None:
         return None
 

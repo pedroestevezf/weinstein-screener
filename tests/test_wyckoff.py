@@ -106,6 +106,13 @@ def test_find_automatic_rally_returns_none_when_sc_is_the_last_row():
     assert result is None
 
 
+def test_find_automatic_rally_ignores_weeks_after_as_of():
+    rows = _wyckoff_scenario_rows()[:21]
+    df = _weekly_df(rows)
+    result = find_automatic_rally(df, sc_index=15, window=12, as_of=18)
+    assert result == 18
+
+
 def test_find_secondary_test_locates_the_retest():
     rows = _wyckoff_scenario_rows()[:25]  # hasta el ST (índice 24) incluido
     df = _weekly_df(rows)
@@ -124,6 +131,13 @@ def test_find_secondary_test_returns_none_when_price_never_retests():
     ar_index = find_automatic_rally(df, sc_index=0, window=12)
     result = find_secondary_test(df, sc_index=0, ar_index=ar_index, window=12)
 
+    assert result is None
+
+
+def test_find_secondary_test_ignores_weeks_after_as_of():
+    rows = _wyckoff_scenario_rows()[:25]
+    df = _weekly_df(rows)
+    result = find_secondary_test(df, sc_index=15, ar_index=20, window=12, as_of=22)
     assert result is None
 
 
@@ -228,3 +242,14 @@ def test_detect_wyckoff_structure_returns_none_when_secondary_test_is_stale():
     result = detect_wyckoff_structure(df)
 
     assert result is None
+
+
+def test_detect_wyckoff_structure_never_looks_past_as_of():
+    rows = _wyckoff_scenario_rows()
+    df = _weekly_df(rows)
+
+    for k in range(len(df)):
+        result_with_as_of = detect_wyckoff_structure(df, as_of=k)
+        result_truncated = detect_wyckoff_structure(df.iloc[: k + 1])
+
+        assert result_with_as_of == result_truncated, f"mismatch at as_of={k}"
