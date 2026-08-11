@@ -90,3 +90,24 @@ def project_range_target(entry_price: float, range_high: float, range_low: float
     if range_high <= range_low:
         return None
     return entry_price + (range_high - range_low)
+
+
+@dataclass
+class ExitSignal:
+    partial_take_profit: bool
+    full_exit: bool
+
+
+def evaluate_exit_signal(
+    current_close: float,
+    range_target: float,
+    current_week_close_above_ma: bool,
+) -> ExitSignal:
+    """Señal de salida: parcial al alcanzar el objetivo de amplitud de
+    rango, total al perder la MA30w (independientemente de si se ha
+    alcanzado o no el objetivo — la invalidación de régimen manda).
+    """
+    return ExitSignal(
+        partial_take_profit=current_close >= range_target,
+        full_exit=not current_week_close_above_ma,
+    )

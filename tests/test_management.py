@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from weinstein_screener.management import find_entry_2_signal, evaluate_position_management, project_range_target
+from weinstein_screener.management import find_entry_2_signal, evaluate_position_management, project_range_target, evaluate_exit_signal
 
 
 def _weekly_df(rows):
@@ -60,3 +60,17 @@ def test_project_range_target_returns_none_with_inconsistent_range():
     result = project_range_target(entry_price=124.0, range_high=100.0, range_low=108.0)
 
     assert result is None
+
+
+def test_evaluate_exit_signal_flags_partial_at_the_range_target():
+    result = evaluate_exit_signal(current_close=140.0, range_target=138.5, current_week_close_above_ma=True)
+
+    assert result.partial_take_profit is True
+    assert result.full_exit is False
+
+
+def test_evaluate_exit_signal_flags_full_exit_below_the_ma30w():
+    result = evaluate_exit_signal(current_close=120.0, range_target=138.5, current_week_close_above_ma=False)
+
+    assert result.partial_take_profit is False
+    assert result.full_exit is True
