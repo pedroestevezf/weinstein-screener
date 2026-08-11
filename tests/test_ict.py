@@ -166,6 +166,22 @@ def test_find_retest_returns_none_without_touching_the_band():
     assert result is None
 
 
+def test_find_retest_triggers_via_no_supply_candle():
+    rows = [
+        {"Open": 118, "High": 122, "Low": 110, "Close": 121, "Volume": 500_000},    # ruptura, índice 0 (rango 12)
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 600_000},    # no toca la banda, índice 1
+        {"Open": 119.3, "High": 119.5, "Low": 117, "Close": 119, "Volume": 200_000},  # vela no-supply, índice 2
+    ]
+    df = _daily_df(rows)
+
+    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.retest_index == 2
+    assert result.no_supply is True
+    assert result.volume_declining is False
+
+
 def test_find_entry_1_signal_composes_mss_order_block_and_stop_loss():
     rows = [{"Open": 105, "High": 107, "Low": 103, "Close": 104, "Volume": 500_000} for _ in range(4)]
     rows.append({"Open": 102, "High": 103, "Low": 97, "Close": 98, "Volume": 900_000})    # ancla, índice 4
