@@ -52,7 +52,7 @@ Cubre únicamente la detección de los disparadores ICT sobre datos diarios ya c
 
 **Interfaces:**
 - Consumes: nada (primer módulo, opera sobre cualquier DataFrame diario OHLCV).
-- Produces: `find_order_block(df: pd.DataFrame, impulse_end_index: int, lookback: int = 10) -> int | None` — posición de la última vela bajista (`Close < Open`) antes de `impulse_end_index`, buscando hacia atrás dentro de `lookback` velas, o `None` si no hay ninguna.
+- Produces: `find_order_block(df: pd.DataFrame, impulse_end_index: int, lookback: int = 10, min_index: int = 0) -> int | None` — posición de la última vela bajista (`Close < Open`) antes de `impulse_end_index`, buscando hacia atrás dentro de `lookback` velas sin cruzar `min_index`, o `None` si no hay ninguna. `min_index` existe para que quien orqueste (Tasks 5 y 6) pueda acotar el Order Block a la propia estructura del disparador, evitando que `entry_price` termine por debajo de `stop_loss`.
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
@@ -95,6 +95,23 @@ def test_find_order_block_returns_none_without_a_bearish_candle_in_range():
     result = find_order_block(df, impulse_end_index=3, lookback=10)
 
     assert result is None
+
+
+def test_find_order_block_does_not_cross_min_index():
+    # La primera vela es bajista pero cae antes de min_index=1 -- no debe
+    # seleccionarse. Sin este límite, el Order Block podría quedar fuera
+    # de la propia estructura del disparador (ver Tasks 5 y 6).
+    rows = [
+        {"Open": 100, "High": 102, "Low": 99, "Close": 98, "Volume": 500_000},
+        {"Open": 100, "High": 102, "Low": 99, "Close": 101, "Volume": 500_000},
+        {"Open": 101, "High": 103, "Low": 100, "Close": 102, "Volume": 500_000},
+        {"Open": 102, "High": 104, "Low": 101, "Close": 103, "Volume": 500_000},
+    ]
+    df = _daily_df(rows)
+
+    result = find_order_block(df, impulse_end_index=4, lookback=10, min_index=1)
+
+    assert result is None
 ```
 
 - [ ] **Step 2: Ejecutar los tests y comprobar que fallan**
@@ -118,11 +135,20 @@ from dataclasses import dataclass
 import pandas as pd
 
 
-def find_order_block(df: pd.DataFrame, impulse_end_index: int, lookback: int = 10) -> int | None:
+def find_order_block(
+    df: pd.DataFrame, impulse_end_index: int, lookback: int = 10, min_index: int = 0
+) -> int | None:
     """Última vela bajista (Close < Open) antes de `impulse_end_index`, buscando
-    hacia atrás dentro de `lookback` velas. Devuelve None si no hay ninguna.
+    hacia atrás dentro de `lookback` velas, sin cruzar `min_index`. Devuelve
+    None si no hay ninguna.
+
+    `min_index` evita que el Order Block se seleccione fuera de la propia
+    estructura que originó el disparador (por ejemplo, antes del ancla del
+    Spring o antes del propio retest) — sin este límite, `entry_price`
+    podría terminar por debajo de `stop_loss` si la vela bajista más
+    cercana está más allá del tramo relevante.
     """
-    start = max(0, impulse_end_index - lookback)
+    start = max(min_index, impulse_end_index - lookback)
     for i in range(impulse_end_index - 1, start - 1, -1):
         if df["Close"].iloc[i] < df["Open"].iloc[i]:
             return i
@@ -135,7 +161,7 @@ def find_order_block(df: pd.DataFrame, impulse_end_index: int, lookback: int = 1
 pytest tests/test_ict.py -v
 ```
 
-Esperado: `2 passed`.
+Esperado: `3 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -254,7 +280,7 @@ def find_fair_value_gap(
 pytest tests/test_ict.py -v
 ```
 
-Esperado: `4 passed`.
+Esperado: `5 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -394,7 +420,7 @@ def find_spring_reentry_mss(
 pytest tests/test_ict.py -v
 ```
 
-Esperado: `7 passed`.
+Esperado: `8 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -454,6 +480,39 @@ def test_find_retest_returns_none_without_touching_the_band():
     result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
 
     assert result is None
+
+
+def test_find_retest_triggers_on_the_first_candidate_day():
+    # La comparación de volumen descendente incluye la propia vela de
+    # ruptura como primer término -- si no, un retest en el primer día
+    # tras la ruptura nunca tendría "vela anterior" con la que compararse.
+    rows = [
+        {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},  # ruptura, índice 0
+        {"Open": 121, "High": 122, "Low": 118, "Close": 119, "Volume": 500_000},  # retest el primer día, índice 1
+    ]
+    df = _daily_df(rows)
+
+    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.retest_index == 1
+    assert result.volume_declining is True
+
+
+def test_find_retest_triggers_via_no_supply_candle():
+    rows = [
+        {"Open": 118, "High": 122, "Low": 110, "Close": 121, "Volume": 500_000},     # ruptura, índice 0 (rango 12)
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 600_000},     # no toca la banda, índice 1
+        {"Open": 119.3, "High": 119.5, "Low": 117, "Close": 119, "Volume": 200_000}, # vela no-supply, índice 2
+    ]
+    df = _daily_df(rows)
+
+    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.retest_index == 2
+    assert result.no_supply is True
+    assert result.volume_declining is False
 ```
 
 - [ ] **Step 2: Ejecutar los tests y comprobar que fallan**
@@ -551,7 +610,7 @@ def find_retest(
 pytest tests/test_ict.py -v
 ```
 
-Esperado: `9 passed`.
+Esperado: `12 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -648,14 +707,19 @@ def find_entry_1_signal(
     fvg_gap_range_fraction: float = 0.2,
 ) -> EntrySignal | None:
     """Compone el disparador de la Entrada 1 (Spring): reingreso al rango,
-    Order Block, y FVG opcional como refuerzo. None si no hay reingreso o
-    no hay Order Block.
+    Order Block, y FVG opcional como refuerzo. None si no hay reingreso, no
+    hay Order Block, o si el precio de entrada resultante no queda por
+    encima del stop-loss (el Order Block se acota con `min_index` al ancla
+    del Spring para que esto no pueda ocurrir en el caso normal, pero la
+    comprobación final es la garantía explícita).
     """
     reentry = find_spring_reentry_mss(df_daily, sc_low, search_start, window)
     if reentry is None:
         return None
 
-    order_block_index = find_order_block(df_daily, reentry.reentry_index, ob_lookback)
+    order_block_index = find_order_block(
+        df_daily, reentry.reentry_index, ob_lookback, min_index=reentry.anchor_index
+    )
     if order_block_index is None:
         return None
 
@@ -674,6 +738,9 @@ def find_entry_1_signal(
     entry_price = df_daily["High"].iloc[order_block_index]
     stop_loss = df_daily["Low"].iloc[reentry.anchor_index] - sl_buffer_atr * atr.iloc[reentry.anchor_index]
 
+    if entry_price <= stop_loss:
+        return None
+
     return EntrySignal(
         trigger_index=reentry.reentry_index,
         order_block_index=order_block_index,
@@ -690,7 +757,7 @@ def find_entry_1_signal(
 pytest tests/test_ict.py -v
 ```
 
-Esperado: `11 passed`.
+Esperado: `14 passed`.
 
 - [ ] **Step 5: Commit**
 
@@ -748,6 +815,30 @@ def test_find_entry_3_signal_returns_none_without_a_retest():
     result = find_entry_3_signal(df, ar_high=120, breakout_index=0, atr=atr, window=5, tolerance=0.05)
 
     assert result is None
+
+
+def test_find_entry_3_signal_can_find_a_reinforcing_fvg_after_the_retest():
+    # El FVG se busca en los días SIGUIENTES al retest (el impulso de
+    # reacción), no en el tramo hacia el Order Block -- ver la nota en la
+    # implementación. `fvg_body_lookback=3` porque con solo 6 filas no hay
+    # suficiente historial para el valor por defecto (20).
+    rows = [
+        {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},     # ruptura, índice 0
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},     # no toca la banda, índice 1
+        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2
+        {"Open": 119, "High": 119.5, "Low": 118.5, "Close": 119, "Volume": 300_000}, # vela1 del FVG, índice 3
+        {"Open": 119, "High": 135, "Low": 118.8, "Close": 133, "Volume": 900_000},   # vela2 impulso, índice 4
+        {"Open": 133, "High": 137, "Low": 131, "Close": 136, "Volume": 500_000},     # vela3, índice 5
+    ]
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_3_signal(
+        df, ar_high=120, breakout_index=0, atr=atr, window=5, tolerance=0.05, fvg_body_lookback=3
+    )
+
+    assert result is not None
+    assert result.fvg_index == 4
 ```
 
 - [ ] **Step 2: Ejecutar los tests y comprobar que fallan**
@@ -779,7 +870,14 @@ def find_entry_3_signal(
 ) -> EntrySignal | None:
     """Compone el disparador de la Entrada 3 (retest): retest de `ar_high`
     con volumen descendente o vela no-supply, Order Block, y FVG opcional
-    como refuerzo. None si no hay retest o no hay Order Block.
+    como refuerzo. None si no hay retest, no hay Order Block, o si el
+    precio de entrada resultante no queda por encima del stop-loss (ver
+    nota equivalente en `find_entry_1_signal`).
+
+    El FVG se busca en los días SIGUIENTES al retest (el posible impulso de
+    reacción), no en el tramo hacia el Order Block — el Order Block nunca
+    puede quedar después del propio retest, así que buscar el FVG hacia
+    "adelante" del Order Block dejaría el rango de búsqueda vacío.
     """
     retest = find_retest(
         df_daily, ar_high, breakout_index, window, tolerance, volume_decline_fraction, no_supply_lookback
@@ -787,13 +885,15 @@ def find_entry_3_signal(
     if retest is None:
         return None
 
-    order_block_index = find_order_block(df_daily, retest.retest_index + 1, ob_lookback)
+    order_block_index = find_order_block(
+        df_daily, retest.retest_index + 1, ob_lookback, min_index=retest.retest_index
+    )
     if order_block_index is None:
         return None
 
     fvg_index = None
     fvg_start = retest.retest_index
-    fvg_end = min(len(df_daily) - 1, order_block_index + 1)
+    fvg_end = min(len(df_daily) - 1, retest.retest_index + window)
     if fvg_end - fvg_start >= 2:
         fvg_index = find_fair_value_gap(
             df_daily, fvg_start, fvg_end, atr, fvg_body_multiplier, fvg_body_lookback, fvg_gap_range_fraction
@@ -801,6 +901,9 @@ def find_entry_3_signal(
 
     entry_price = df_daily["High"].iloc[order_block_index]
     stop_loss = df_daily["Low"].iloc[retest.retest_index]
+
+    if entry_price <= stop_loss:
+        return None
 
     return EntrySignal(
         trigger_index=retest.retest_index,
@@ -818,7 +921,7 @@ def find_entry_3_signal(
 pytest tests/test_ict.py -v
 ```
 
-Esperado: `13 passed`.
+Esperado: `17 passed`.
 
 - [ ] **Step 5: Ejecutar toda la suite de tests del proyecto**
 
@@ -826,7 +929,7 @@ Esperado: `13 passed`.
 pytest -v
 ```
 
-Esperado: `54 passed` (41 de los Planes 1-2 + 13 de este plan).
+Esperado: `58 passed` (41 de los Planes 1-2 + 17 de este plan).
 
 - [ ] **Step 6: Commit**
 
