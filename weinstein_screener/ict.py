@@ -228,3 +228,52 @@ def find_entry_1_signal(
         stop_loss=stop_loss,
         high_confidence=reentry.high_confidence,
     )
+
+
+def find_entry_3_signal(
+    df_daily: pd.DataFrame,
+    ar_high: float,
+    breakout_index: int,
+    atr: pd.Series,
+    window: int = 5,
+    tolerance: float = 0.05,
+    ob_lookback: int = 10,
+    volume_decline_fraction: float = 0.8,
+    no_supply_lookback: int = 10,
+    fvg_body_multiplier: float = 1.5,
+    fvg_body_lookback: int = 20,
+    fvg_gap_range_fraction: float = 0.2,
+) -> EntrySignal | None:
+    """Compone el disparador de la Entrada 3 (retest): retest de `ar_high`
+    con volumen descendente o vela no-supply, Order Block, y FVG opcional
+    como refuerzo. None si no hay retest o no hay Order Block.
+    """
+    retest = find_retest(
+        df_daily, ar_high, breakout_index, window, tolerance, volume_decline_fraction, no_supply_lookback
+    )
+    if retest is None:
+        return None
+
+    order_block_index = find_order_block(df_daily, retest.retest_index + 1, ob_lookback)
+    if order_block_index is None:
+        return None
+
+    fvg_index = None
+    fvg_start = retest.retest_index
+    fvg_end = min(len(df_daily) - 1, order_block_index + 1)
+    if fvg_end - fvg_start >= 2:
+        fvg_index = find_fair_value_gap(
+            df_daily, fvg_start, fvg_end, atr, fvg_body_multiplier, fvg_body_lookback, fvg_gap_range_fraction
+        )
+
+    entry_price = df_daily["High"].iloc[order_block_index]
+    stop_loss = df_daily["Low"].iloc[retest.retest_index]
+
+    return EntrySignal(
+        trigger_index=retest.retest_index,
+        order_block_index=order_block_index,
+        fvg_index=fvg_index,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        high_confidence=retest.no_supply,
+    )

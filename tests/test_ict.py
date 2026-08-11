@@ -1,7 +1,14 @@
 import pandas as pd
 import pytest
 
-from weinstein_screener.ict import find_fair_value_gap, find_order_block, find_spring_reentry_mss, find_retest
+from weinstein_screener.ict import (
+    find_entry_1_signal,
+    find_entry_3_signal,
+    find_fair_value_gap,
+    find_order_block,
+    find_retest,
+    find_spring_reentry_mss,
+)
 
 
 def _daily_df(rows):
@@ -131,9 +138,6 @@ def test_find_retest_returns_none_without_touching_the_band():
     assert result is None
 
 
-from weinstein_screener.ict import find_entry_1_signal
-
-
 def test_find_entry_1_signal_composes_mss_order_block_and_stop_loss():
     rows = [{"Open": 105, "High": 107, "Low": 103, "Close": 104, "Volume": 500_000} for _ in range(4)]
     rows.append({"Open": 102, "High": 103, "Low": 97, "Close": 98, "Volume": 900_000})    # ancla, índice 4
@@ -158,5 +162,34 @@ def test_find_entry_1_signal_returns_none_without_a_reentry():
     atr = pd.Series([1.0] * len(df), index=df.index)
 
     result = find_entry_1_signal(df, sc_low=100, search_start=0, atr=atr, window=5)
+
+    assert result is None
+
+
+def test_find_entry_3_signal_composes_retest_order_block_and_stop_loss():
+    rows = [
+        {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},    # ruptura, índice 0
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},    # aún no toca la banda, índice 1
+        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2 (bajista)
+        {"Open": 119, "High": 125, "Low": 118.5, "Close": 124, "Volume": 600_000},   # impulso alcista
+    ]
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_3_signal(df, ar_high=120, breakout_index=0, atr=atr, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.trigger_index == 2
+    assert result.order_block_index == 2
+    assert result.entry_price == pytest.approx(122.5)
+    assert result.stop_loss == pytest.approx(118)
+
+
+def test_find_entry_3_signal_returns_none_without_a_retest():
+    rows = [{"Open": 130, "High": 132, "Low": 129, "Close": 131, "Volume": 500_000} for _ in range(6)]
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_3_signal(df, ar_high=120, breakout_index=0, atr=atr, window=5, tolerance=0.05)
 
     assert result is None
