@@ -72,3 +72,21 @@ def evaluate_position_management(
         resize_entry2_pct=resize_entry2_pct,
         resize_entry3_pct=resize_entry3_pct,
     )
+
+
+def project_range_target(entry_price: float, range_high: float, range_low: float) -> float | None:
+    """Proyecta el objetivo de toma de beneficios parcial como la
+    amplitud del propio rango de acumulación semanal (Cause) sumada al
+    precio de entrada.
+
+    Es una proyección VERTICAL (altura del rango en el gráfico de
+    barras), inspirada en el principio Cause→Effect de Wyckoff, pero no
+    es el conteo clásico de Point & Figure (que cuenta la anchura
+    horizontal de la congestión en un gráfico P&F y la proyecta con el
+    tamaño de caja) — no reclamar esa precisión al consumir este valor.
+
+    None si el rango es inconsistente (range_high <= range_low).
+    """
+    if range_high <= range_low:
+        return None
+    return entry_price + (range_high - range_low)

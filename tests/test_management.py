@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from weinstein_screener.management import find_entry_2_signal, evaluate_position_management
+from weinstein_screener.management import find_entry_2_signal, evaluate_position_management, project_range_target
 
 
 def _weekly_df(rows):
@@ -48,3 +48,15 @@ def test_evaluate_position_management_resizes_after_a_failed_spring():
     assert result.move_entry1_to_breakeven is False
     assert result.resize_entry2_pct == pytest.approx(42.857, abs=0.01)
     assert result.resize_entry3_pct == pytest.approx(57.143, abs=0.01)
+
+
+def test_project_range_target_projects_the_range_amplitude_from_entry():
+    result = project_range_target(entry_price=124.0, range_high=124.0, range_low=108.0)
+
+    assert result == pytest.approx(140.0)
+
+
+def test_project_range_target_returns_none_with_inconsistent_range():
+    result = project_range_target(entry_price=124.0, range_high=100.0, range_low=108.0)
+
+    assert result is None
