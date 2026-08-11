@@ -93,3 +93,76 @@ def find_spring_reentry_mss(
     )
 
     return SpringReentry(anchor_index=anchor_index, reentry_index=reentry_index, high_confidence=high_confidence)
+
+
+@dataclass
+class RetestResult:
+    retest_index: int
+    volume_declining: bool
+    no_supply: bool
+
+
+def _is_no_supply_candle(df: pd.DataFrame, index: int, range_lookback: int = 10) -> bool:
+    is_bearish = df["Close"].iloc[index] < df["Open"].iloc[index]
+    low = df["Low"].iloc[index]
+    high = df["High"].iloc[index]
+    candle_range = high - low
+
+    prior_ranges = (df["High"] - df["Low"]).iloc[max(0, index - range_lookback) : index]
+    avg_range = prior_ranges.mean()
+    small_range = not pd.isna(avg_range) and candle_range < avg_range
+
+    close_position = (df["Close"].iloc[index] - low) / candle_range if candle_range > 0 else 0
+    upper_half_close = close_position >= 0.5
+
+    if index >= 2:
+        avg_volume_prev2 = df["Volume"].iloc[index - 2 : index].mean()
+        low_volume = df["Volume"].iloc[index] < avg_volume_prev2
+    else:
+        low_volume = False
+
+    return bool(is_bearish and small_range and upper_half_close and low_volume)
+
+
+def find_retest(
+    df: pd.DataFrame,
+    ar_high: float,
+    breakout_index: int,
+    window: int = 5,
+    tolerance: float = 0.05,
+    volume_decline_fraction: float = 0.8,
+    no_supply_lookback: int = 10,
+) -> RetestResult | None:
+    """Primera vela, dentro de `window` días tras `breakout_index`, que toca
+    la banda `±tolerance` alrededor de `ar_high` con volumen descendente o
+    una vela "no supply".
+    """
+    band_low = ar_high * (1 - tolerance)
+    band_high = ar_high * (1 + tolerance)
+    end = min(len(df), breakout_index + 1 + window)
+    candidates = list(range(breakout_index + 1, end))
+
+    for position, i in enumerate(candidates):
+        low = df["Low"].iloc[i]
+        high = df["High"].iloc[i]
+        touches_band = high >= band_low and low <= band_high
+        if not touches_band:
+            continue
+
+        segment = candidates[: position + 1]
+        if len(segment) >= 2:
+            declines = sum(
+                1
+                for k in range(1, len(segment))
+                if df["Volume"].iloc[segment[k]] < df["Volume"].iloc[segment[k - 1]]
+            )
+            volume_declining = (declines / (len(segment) - 1)) >= volume_decline_fraction
+        else:
+            volume_declining = False
+
+        no_supply = _is_no_supply_candle(df, i, no_supply_lookback)
+
+        if volume_declining or no_supply:
+            return RetestResult(retest_index=i, volume_declining=volume_declining, no_supply=no_supply)
+
+    return None

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from weinstein_screener.ict import find_fair_value_gap, find_order_block, find_spring_reentry_mss
+from weinstein_screener.ict import find_fair_value_gap, find_order_block, find_spring_reentry_mss, find_retest
 
 
 def _daily_df(rows):
@@ -102,5 +102,30 @@ def test_find_spring_reentry_mss_returns_none_without_an_anchor():
     df = _daily_df(rows)
 
     result = find_spring_reentry_mss(df, sc_low=100, search_start=0, window=5)
+
+    assert result is None
+
+
+def test_find_retest_locates_the_retest_with_declining_volume():
+    rows = [
+        {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},   # ruptura, índice 0
+        {"Open": 121, "High": 123, "Low": 119, "Close": 122, "Volume": 700_000},
+        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},  # retest, índice 2
+        {"Open": 119, "High": 120, "Low": 116, "Close": 117, "Volume": 300_000},
+        {"Open": 117, "High": 118, "Low": 115, "Close": 116, "Volume": 200_000},
+    ]
+    df = _daily_df(rows)
+
+    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+
+    assert result.retest_index == 2
+    assert result.volume_declining is True
+
+
+def test_find_retest_returns_none_without_touching_the_band():
+    rows = [{"Open": 130, "High": 132, "Low": 129, "Close": 131, "Volume": 500_000} for _ in range(6)]
+    df = _daily_df(rows)
+
+    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
 
     assert result is None
