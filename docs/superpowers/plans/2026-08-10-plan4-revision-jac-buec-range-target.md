@@ -584,7 +584,7 @@ git commit -m "feat: add range-amplitude profit target (replaces PO3 ceiling)"
 
 **Interfaces:**
 - `ExitSignal` (dataclass): `partial_take_profit: bool`, `full_exit: bool`.
-- `evaluate_exit_signal(current_close: float, range_target: float, current_week_close_above_ma: bool) -> ExitSignal`. `partial_take_profit` es `True` cuando el precio actual alcanza o supera `range_target` (Task 4). `full_exit` es `True` cuando la semana actual cierra por debajo de la MA30w (`current_week_close_above_ma=False`, `weinstein_screener.regime.close_above_ma` del Plan 1) — la invalidación de régimen manda sobre la gestión táctica de beneficios, independientemente de si se alcanzó o no el objetivo de amplitud.
+- `evaluate_exit_signal(current_close: float, range_target: float | None, current_week_close_above_ma: bool) -> ExitSignal`. `partial_take_profit` es `True` cuando `range_target` no es `None` y el precio actual lo alcanza o supera (Task 4 puede devolver `None` con datos inconsistentes — esta función debe manejarlo, no asumir que siempre recibe un `float`). `full_exit` es `True` cuando la semana actual cierra por debajo de la MA30w (`current_week_close_above_ma=False`, `weinstein_screener.regime.close_above_ma` del Plan 1) — la invalidación de régimen manda sobre la gestión táctica de beneficios, independientemente de si se alcanzó o no el objetivo de amplitud (incluso con `range_target=None`, `full_exit` debe poder ser `True`).
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
@@ -603,6 +603,26 @@ def test_evaluate_exit_signal_flags_partial_at_the_range_target():
 
 def test_evaluate_exit_signal_flags_full_exit_below_the_ma30w():
     result = evaluate_exit_signal(current_close=120.0, range_target=138.5, current_week_close_above_ma=False)
+
+    assert result.partial_take_profit is False
+    assert result.full_exit is True
+
+
+def test_evaluate_exit_signal_full_exit_fires_even_after_the_partial_target():
+    # Prueba de independencia: ambos flags deben poder ser True a la vez --
+    # la invalidación de régimen no debe quedar bloqueada por haber
+    # alcanzado ya el objetivo de amplitud, ni viceversa.
+    result = evaluate_exit_signal(current_close=140.0, range_target=138.5, current_week_close_above_ma=False)
+
+    assert result.partial_take_profit is True
+    assert result.full_exit is True
+
+
+def test_evaluate_exit_signal_handles_a_missing_range_target():
+    # project_range_target (Task 4) puede devolver None con datos
+    # inconsistentes -- evaluate_exit_signal debe seguir funcionando y
+    # la invalidación de régimen (full_exit) debe seguir pudiendo dispararse.
+    result = evaluate_exit_signal(current_close=120.0, range_target=None, current_week_close_above_ma=False)
 
     assert result.partial_take_profit is False
     assert result.full_exit is True
@@ -629,15 +649,22 @@ class ExitSignal:
 
 def evaluate_exit_signal(
     current_close: float,
-    range_target: float,
+    range_target: float | None,
     current_week_close_above_ma: bool,
 ) -> ExitSignal:
     """Señal de salida: parcial al alcanzar el objetivo de amplitud de
-    rango, total al perder la MA30w (independientemente de si se ha
-    alcanzado o no el objetivo — la invalidación de régimen manda).
+    rango, total al perder la MA30w. Ambos flags se calculan de forma
+    independiente -- `full_exit` puede ser True aunque también se haya
+    alcanzado el objetivo parcial (y viceversa), porque la invalidación
+    de régimen manda sobre la gestión táctica de beneficios.
+
+    `range_target` puede ser None (`project_range_target`, Task 4, lo
+    devuelve así con datos inconsistentes) -- en ese caso
+    `partial_take_profit` es simplemente False, pero `full_exit` sigue
+    evaluándose con normalidad.
     """
     return ExitSignal(
-        partial_take_profit=current_close >= range_target,
+        partial_take_profit=range_target is not None and current_close >= range_target,
         full_exit=not current_week_close_above_ma,
     )
 ```
@@ -648,7 +675,84 @@ def evaluate_exit_signal(
 pytest tests/test_management.py -v
 ```
 
-Esperado: `8 passed`.
+Esperado: `10 passed`.
+
+- [ ] **Step 4b: Añadir un test de integración cruzando `wyckoff.py` → `management.py`, y un guardarraíl contra la reintroducción de la terminología antigua**
+
+Ningún test existente cruza la frontera entre `weinstein_screener.wyckoff` y `weinstein_screener.management` — cada módulo se testea de forma aislada. Esto significa que un futuro cambio accidental en `jac_index` (o en cualquier otro campo que `management.py` consume) podría romper la integración real sin que ningún test lo detecte. Añadir a `tests/test_management.py`:
+
+```python
+import math
+
+from weinstein_screener.wyckoff import detect_wyckoff_structure
+
+
+def _wyckoff_scenario_rows():
+    """Mismo escenario sintético verificado del Plan 2: SC=15, AR=20, ST=24,
+    Spring=35, JAC=39 (range_low=112.5, range_high=138.5)."""
+    rows = []
+    price = 150.0
+    for _ in range(15):
+        price -= 1.5
+        rows.append({"Open": price + 1, "High": price + 2, "Low": price - 1, "Close": price, "Volume": 1_000_000})
+    sc_low = price - 15
+    rows.append({"Open": price - 1, "High": price + 1, "Low": sc_low, "Close": price - 5, "Volume": 5_000_000})
+    price = price - 5
+    for _ in range(5):
+        price += 3
+        rows.append({"Open": price - 3, "High": price + 1, "Low": price - 4, "Close": price, "Volume": 900_000})
+    for _ in range(3):
+        price -= 2
+        rows.append({"Open": price + 2, "High": price + 3, "Low": price - 1, "Close": price, "Volume": 800_000})
+    rows.append({"Open": 122, "High": 123, "Low": 115.0, "Close": 121, "Volume": 700_000})
+    for i in range(10):
+        c = 122 + math.sin(i) * 5
+        rows.append({"Open": c - 1, "High": c + 3, "Low": c - 3, "Close": c, "Volume": 600_000 + i * 5000})
+    rows.append({"Open": 114, "High": 116, "Low": 108, "Close": 113, "Volume": 900_000})
+    for i in range(3):
+        c = 118 + i
+        rows.append({"Open": c - 1, "High": c + 2, "Low": c - 2, "Close": c, "Volume": 500_000})
+    rows.append({"Open": 138, "High": 144, "Low": 137, "Close": 141, "Volume": 950_000})
+    return rows
+
+
+def test_management_pipeline_composes_end_to_end_with_a_real_wyckoff_structure():
+    df = _weekly_df(_wyckoff_scenario_rows())
+    structure = detect_wyckoff_structure(df)
+    atr = pd.Series([2.0] * len(df), index=df.index)
+
+    entry2 = find_entry_2_signal(df, structure.jac_index, atr)
+    target = project_range_target(entry2.entry_price, structure.range_high, structure.range_low)
+    exit_signal = evaluate_exit_signal(current_close=170.0, range_target=target, current_week_close_above_ma=True)
+
+    assert entry2.trigger_index == 39
+    assert entry2.entry_price == pytest.approx(141.0)
+    assert target == pytest.approx(167.0)
+    assert exit_signal.partial_take_profit is True
+```
+
+Y un guardarraíl explícito, en el mismo archivo, que falle de forma ruidosa si alguien reintroduce la terminología antigua en el paquete:
+
+```python
+import subprocess
+
+
+def test_old_terminology_does_not_reappear_in_the_package():
+    result = subprocess.run(
+        ["grep", "-rniE", "distribution_index|find_distribution|RetestResult|find_retest\\b|retest_index",
+         "weinstein_screener/"],
+        capture_output=True, text=True,
+    )
+    assert result.stdout == "", f"Terminología antigua reintroducida:\n{result.stdout}"
+```
+
+Ejecutar y comprobar que ambos pasan:
+
+```bash
+pytest tests/test_management.py -v -k "pipeline or old_terminology"
+```
+
+Esperado: `2 passed`.
 
 - [ ] **Step 5: Ejecutar toda la suite de tests del proyecto**
 
@@ -656,7 +760,7 @@ Esperado: `8 passed`.
 pytest -v
 ```
 
-Esperado: `66 passed` (58 de los Planes 1-3 + 8 de este plan).
+Esperado: `68 passed` (58 de los Planes 1-3 + 10 de este plan).
 
 - [ ] **Step 6: Commit**
 
