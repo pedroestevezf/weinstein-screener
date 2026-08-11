@@ -1,5 +1,6 @@
 import math
 import subprocess
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -139,9 +140,10 @@ def test_management_pipeline_composes_end_to_end_with_a_real_wyckoff_structure()
 
 
 def test_old_terminology_does_not_reappear_in_the_package():
+    repo_root = Path(__file__).resolve().parent.parent
     result = subprocess.run(
         ["grep", "-rniE", "distribution_index|find_distribution|RetestResult|find_retest\\b|retest_index",
          "weinstein_screener/"],
-        capture_output=True, text=True, cwd="/Users/pedroestevezf/Claude/screener weinstein",
+        capture_output=True, text=True, cwd=repo_root,
     )
     assert result.stdout == "", f"Terminología antigua reintroducida:\n{result.stdout}"
