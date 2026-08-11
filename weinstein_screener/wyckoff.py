@@ -144,10 +144,16 @@ def find_spring(
     return None
 
 
-def find_distribution(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high: float) -> int | None:
+def find_jac(df: pd.DataFrame, phase_b_start: int, as_of: int, ar_high: float) -> int | None:
     """Primera semana cuyo cierre rompe al alza `ar_high` (el máximo del
     Automatic Rally, la resistencia de toda la estructura) con volumen por
     encima de la media de la Fase B hasta ese punto (sin look-ahead).
+
+    Este evento es el JAC (Jump Across the Creek) de Wyckoff clásico: el
+    "salto" alcista fuera del rango de acumulación con volumen, Fase D.
+    No confundir con "Distribution" — en Wyckoff clásico ese término
+    designa una estructura de techo bajista, lo opuesto a lo que se
+    detecta aquí.
     """
     for i in range(phase_b_start + 1, as_of + 1):
         prior = df.iloc[phase_b_start:i]
@@ -173,7 +179,7 @@ class WyckoffStructure:
     range_low: float  # = mínimo del Selling Climax (soporte real). NUNCA un mínimo local de la Fase B.
     range_high: float  # = máximo del Automatic Rally (resistencia real). NUNCA un máximo local de la Fase B.
     spring_index: int | None
-    distribution_index: int | None
+    jac_index: int | None  # = JAC (Jump Across the Creek): ruptura de range_high con volumen, Fase D
 
 
 def detect_wyckoff_structure(
@@ -226,14 +232,14 @@ def detect_wyckoff_structure(
 
     # El rango de referencia es el de TODA la estructura (SC=soporte, AR=resistencia),
     # no un rango más local observado solo dentro de la Fase B — ver la nota en la
-    # Task 4 y la Task 5 sobre por qué esto importa para el Spring y la Distribution.
+    # Task 4 y la Task 5 sobre por qué esto importa para el Spring y el JAC.
     range_low = df_weekly["Low"].iloc[sc_index]
     range_high = df_weekly["High"].iloc[ar_index]
 
     spring_index = find_spring(
         df_weekly, st_index, as_of, range_low, spring_close_tolerance, spring_close_position_min
     )
-    distribution_index = find_distribution(df_weekly, st_index, as_of, range_high)
+    jac_index = find_jac(df_weekly, st_index, as_of, range_high)
 
     return WyckoffStructure(
         sc_index=sc_index,
@@ -245,5 +251,5 @@ def detect_wyckoff_structure(
         range_low=range_low,
         range_high=range_high,
         spring_index=spring_index,
-        distribution_index=distribution_index,
+        jac_index=jac_index,
     )

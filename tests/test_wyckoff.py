@@ -5,7 +5,7 @@ import pytest
 
 from weinstein_screener.wyckoff import (
     find_automatic_rally,
-    find_distribution,
+    find_jac,
     find_secondary_test,
     find_selling_climax_candidates,
     find_spring,
@@ -21,7 +21,7 @@ def _weekly_df(rows):
 
 def _wyckoff_scenario_rows():
     """Escenario sintético verificado end-to-end (ver docs/superpowers/plans/2026-08-09-plan2-wyckoff-crt-structure.md):
-    SC en índice 15, AR en 20, ST en 24, Spring en 35, Distribution en 39.
+    SC en índice 15, AR en 20, ST en 24, Spring en 35, JAC en 39.
     """
     rows = []
     price = 150.0
@@ -183,32 +183,32 @@ def test_find_spring_ignores_a_low_that_does_not_reach_the_climax_low():
     assert result is None
 
 
-def test_find_distribution_locates_the_breakout_week():
+def test_find_jac_locates_the_breakout_week():
     rows = _wyckoff_scenario_rows()  # escenario completo de 40 semanas
     df = _weekly_df(rows)
 
-    result = find_distribution(df, phase_b_start=24, as_of=39, ar_high=138.5)
+    result = find_jac(df, phase_b_start=24, as_of=39, ar_high=138.5)
 
     assert result == 39
 
 
-def test_find_distribution_returns_none_without_a_breakout():
+def test_find_jac_returns_none_without_a_breakout():
     rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(15)]
     df = _weekly_df(rows)
 
-    result = find_distribution(df, phase_b_start=0, as_of=14, ar_high=110.0)
+    result = find_jac(df, phase_b_start=0, as_of=14, ar_high=110.0)
 
     assert result is None
 
 
-def test_find_distribution_ignores_a_close_that_does_not_reach_the_rally_high():
+def test_find_jac_ignores_a_close_that_does_not_reach_the_rally_high():
     # Rompe el máximo local de la Fase B, pero NO el máximo del Automatic Rally (110.0)
-    # -- no debe contar como Distribution, aunque el volumen sea alto.
+    # -- no debe contar como JAC, aunque el volumen sea alto.
     rows = [{"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 500_000} for _ in range(5)]
     rows.append({"Open": 101, "High": 104, "Low": 100, "Close": 103, "Volume": 900_000})
     df = _weekly_df(rows)
 
-    result = find_distribution(df, phase_b_start=0, as_of=5, ar_high=110.0)
+    result = find_jac(df, phase_b_start=0, as_of=5, ar_high=110.0)
 
     assert result is None
 
@@ -229,7 +229,7 @@ def test_detect_wyckoff_structure_finds_the_full_pattern():
     assert result.range_low == pytest.approx(112.5)
     assert result.range_high == pytest.approx(138.5)
     assert result.spring_index == 35
-    assert result.distribution_index == 39
+    assert result.jac_index == 39
 
 
 def test_detect_wyckoff_structure_returns_none_without_a_climax():
