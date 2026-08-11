@@ -12,11 +12,20 @@ class SpringReentry:
     high_confidence: bool
 
 
-def find_order_block(df: pd.DataFrame, impulse_end_index: int, lookback: int = 10) -> int | None:
+def find_order_block(
+    df: pd.DataFrame, impulse_end_index: int, lookback: int = 10, min_index: int = 0
+) -> int | None:
     """Última vela bajista (Close < Open) antes de `impulse_end_index`, buscando
-    hacia atrás dentro de `lookback` velas. Devuelve None si no hay ninguna.
+    hacia atrás dentro de `lookback` velas, sin cruzar `min_index`. Devuelve
+    None si no hay ninguna.
+
+    `min_index` evita que el Order Block se seleccione fuera de la propia
+    estructura que originó el disparador (por ejemplo, antes del ancla del
+    Spring o antes del propio retest) — sin este límite, `entry_price`
+    podría terminar por debajo de `stop_loss` si la vela bajista más
+    cercana está más allá del tramo relevante.
     """
-    start = max(0, impulse_end_index - lookback)
+    start = max(min_index, impulse_end_index - lookback)
     for i in range(impulse_end_index - 1, start - 1, -1):
         if df["Close"].iloc[i] < df["Open"].iloc[i]:
             return i
@@ -201,7 +210,7 @@ def find_entry_1_signal(
     if reentry is None:
         return None
 
-    order_block_index = find_order_block(df_daily, reentry.reentry_index, ob_lookback)
+    order_block_index = find_order_block(df_daily, reentry.reentry_index, ob_lookback, min_index=reentry.anchor_index)
     if order_block_index is None:
         return None
 
@@ -219,6 +228,9 @@ def find_entry_1_signal(
 
     entry_price = df_daily["High"].iloc[order_block_index]
     stop_loss = df_daily["Low"].iloc[reentry.anchor_index] - sl_buffer_atr * atr.iloc[reentry.anchor_index]
+
+    if entry_price <= stop_loss:
+        return None
 
     return EntrySignal(
         trigger_index=reentry.reentry_index,
@@ -254,13 +266,15 @@ def find_entry_3_signal(
     if retest is None:
         return None
 
-    order_block_index = find_order_block(df_daily, retest.retest_index + 1, ob_lookback)
+    order_block_index = find_order_block(
+        df_daily, retest.retest_index + 1, ob_lookback, min_index=retest.retest_index
+    )
     if order_block_index is None:
         return None
 
     fvg_index = None
     fvg_start = retest.retest_index
-    fvg_end = min(len(df_daily) - 1, order_block_index + 1)
+    fvg_end = min(len(df_daily) - 1, retest.retest_index + window)
     if fvg_end - fvg_start >= 2:
         fvg_index = find_fair_value_gap(
             df_daily, fvg_start, fvg_end, atr, fvg_body_multiplier, fvg_body_lookback, fvg_gap_range_fraction
@@ -268,6 +282,9 @@ def find_entry_3_signal(
 
     entry_price = df_daily["High"].iloc[order_block_index]
     stop_loss = df_daily["Low"].iloc[retest.retest_index]
+
+    if entry_price <= stop_loss:
+        return None
 
     return EntrySignal(
         trigger_index=retest.retest_index,

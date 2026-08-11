@@ -43,6 +43,20 @@ def test_find_order_block_returns_none_without_a_bearish_candle_in_range():
     assert result is None
 
 
+def test_find_order_block_does_not_cross_min_index():
+    rows = [
+        {"Open": 100, "High": 102, "Low": 99, "Close": 98, "Volume": 500_000},   # bearish, but before min_index
+        {"Open": 100, "High": 102, "Low": 99, "Close": 101, "Volume": 500_000},
+        {"Open": 101, "High": 103, "Low": 100, "Close": 102, "Volume": 500_000},
+        {"Open": 102, "High": 104, "Low": 101, "Close": 103, "Volume": 500_000},
+    ]
+    df = _daily_df(rows)
+
+    result = find_order_block(df, impulse_end_index=4, lookback=10, min_index=1)
+
+    assert result is None
+
+
 def test_find_fair_value_gap_locates_a_valid_gap():
     calm = [{"Open": 100, "High": 101, "Low": 99, "Close": 100.3, "Volume": 400_000} for _ in range(25)]
     rows = calm + [
@@ -129,6 +143,20 @@ def test_find_retest_locates_the_retest_with_declining_volume():
     assert result.volume_declining is True
 
 
+def test_find_retest_triggers_on_the_first_candidate_day():
+    rows = [
+        {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},  # ruptura, índice 0
+        {"Open": 121, "High": 122, "Low": 118, "Close": 119, "Volume": 500_000},  # retest el primer día, índice 1
+    ]
+    df = _daily_df(rows)
+
+    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.retest_index == 1
+    assert result.volume_declining is True
+
+
 def test_find_retest_returns_none_without_touching_the_band():
     rows = [{"Open": 130, "High": 132, "Low": 129, "Close": 131, "Volume": 500_000} for _ in range(6)]
     df = _daily_df(rows)
@@ -183,6 +211,26 @@ def test_find_entry_3_signal_composes_retest_order_block_and_stop_loss():
     assert result.order_block_index == 2
     assert result.entry_price == pytest.approx(122.5)
     assert result.stop_loss == pytest.approx(118)
+
+
+def test_find_entry_3_signal_can_find_a_reinforcing_fvg_after_the_retest():
+    rows = [
+        {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},    # ruptura, índice 0
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},    # no toca la banda, índice 1
+        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2
+        {"Open": 119, "High": 119.5, "Low": 118.5, "Close": 119, "Volume": 300_000}, # vela1 del FVG, índice 3
+        {"Open": 119, "High": 135, "Low": 118.8, "Close": 133, "Volume": 900_000},   # vela2 impulso, índice 4
+        {"Open": 133, "High": 137, "Low": 131, "Close": 136, "Volume": 500_000},     # vela3, índice 5
+    ]
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_3_signal(
+        df, ar_high=120, breakout_index=0, atr=atr, window=5, tolerance=0.05, fvg_body_lookback=3
+    )
+
+    assert result is not None
+    assert result.fvg_index == 4
 
 
 def test_find_entry_3_signal_returns_none_without_a_retest():
