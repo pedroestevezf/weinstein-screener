@@ -105,8 +105,8 @@ def find_spring_reentry_mss(
 
 
 @dataclass
-class RetestResult:
-    retest_index: int
+class BuecResult:
+    buec_index: int
     volume_declining: bool
     no_supply: bool
 
@@ -133,7 +133,7 @@ def _is_no_supply_candle(df: pd.DataFrame, index: int, range_lookback: int = 10)
     return bool(is_bearish and small_range and upper_half_close and low_volume)
 
 
-def find_retest(
+def find_buec(
     df: pd.DataFrame,
     ar_high: float,
     breakout_index: int,
@@ -141,14 +141,16 @@ def find_retest(
     tolerance: float = 0.05,
     volume_decline_fraction: float = 0.8,
     no_supply_lookback: int = 10,
-) -> RetestResult | None:
+) -> BuecResult | None:
     """Primera vela, dentro de `window` días tras `breakout_index`, que toca
     la banda `±tolerance` alrededor de `ar_high` con volumen descendente o
-    una vela "no supply".
+    una vela "no supply". Este es el BUEC (Back Up to Edge of Creek): el
+    reteste de la zona rota desde arriba, tras el JAC, antes de continuar
+    el markup.
 
     La comparación de volumen descendente incluye la propia vela de ruptura
     (`breakout_index`) como primer término — si no se incluyera, una vela
-    de retest que ocurre justo en el primer día tras la ruptura nunca
+    de BUEC que ocurre justo en el primer día tras la ruptura nunca
     tendría una "vela anterior" con la que compararse y el criterio de
     volumen descendente no podría dispararse nunca en ese caso.
     """
@@ -175,7 +177,7 @@ def find_retest(
         no_supply = _is_no_supply_candle(df, i, no_supply_lookback)
 
         if volume_declining or no_supply:
-            return RetestResult(retest_index=i, volume_declining=volume_declining, no_supply=no_supply)
+            return BuecResult(buec_index=i, volume_declining=volume_declining, no_supply=no_supply)
 
     return None
 
@@ -256,41 +258,42 @@ def find_entry_3_signal(
     fvg_body_lookback: int = 20,
     fvg_gap_range_fraction: float = 0.2,
 ) -> EntrySignal | None:
-    """Compone el disparador de la Entrada 3 (retest): retest de `ar_high`
-    con volumen descendente o vela no-supply, Order Block, y FVG opcional
-    como refuerzo. None si no hay retest o no hay Order Block.
+    """Compone el disparador de la Entrada 3 (BUEC): BUEC (Back Up to Edge
+    of Creek) de `ar_high` con volumen descendente o vela no-supply, Order
+    Block, y FVG opcional como refuerzo. None si no hay BUEC o no hay Order
+    Block.
     """
-    retest = find_retest(
+    buec = find_buec(
         df_daily, ar_high, breakout_index, window, tolerance, volume_decline_fraction, no_supply_lookback
     )
-    if retest is None:
+    if buec is None:
         return None
 
     order_block_index = find_order_block(
-        df_daily, retest.retest_index + 1, ob_lookback, min_index=retest.retest_index
+        df_daily, buec.buec_index + 1, ob_lookback, min_index=buec.buec_index
     )
     if order_block_index is None:
         return None
 
     fvg_index = None
-    fvg_start = retest.retest_index
-    fvg_end = min(len(df_daily) - 1, retest.retest_index + window)
+    fvg_start = buec.buec_index
+    fvg_end = min(len(df_daily) - 1, buec.buec_index + window)
     if fvg_end - fvg_start >= 2:
         fvg_index = find_fair_value_gap(
             df_daily, fvg_start, fvg_end, atr, fvg_body_multiplier, fvg_body_lookback, fvg_gap_range_fraction
         )
 
     entry_price = df_daily["High"].iloc[order_block_index]
-    stop_loss = df_daily["Low"].iloc[retest.retest_index]
+    stop_loss = df_daily["Low"].iloc[buec.buec_index]
 
     if entry_price <= stop_loss:
         return None
 
     return EntrySignal(
-        trigger_index=retest.retest_index,
+        trigger_index=buec.buec_index,
         order_block_index=order_block_index,
         fvg_index=fvg_index,
         entry_price=entry_price,
         stop_loss=stop_loss,
-        high_confidence=retest.no_supply,
+        high_confidence=buec.no_supply,
     )

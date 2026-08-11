@@ -2,11 +2,11 @@ import pandas as pd
 import pytest
 
 from weinstein_screener.ict import (
+    find_buec,
     find_entry_1_signal,
     find_entry_3_signal,
     find_fair_value_gap,
     find_order_block,
-    find_retest,
     find_spring_reentry_mss,
 )
 
@@ -127,46 +127,46 @@ def test_find_spring_reentry_mss_returns_none_without_an_anchor():
     assert result is None
 
 
-def test_find_retest_locates_the_retest_with_declining_volume():
+def test_find_buec_locates_the_buec_with_declining_volume():
     rows = [
         {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},   # ruptura, índice 0
         {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},   # aún no toca la banda, índice 1
-        {"Open": 127, "High": 127, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2
+        {"Open": 127, "High": 127, "Low": 118, "Close": 119, "Volume": 500_000},   # BUEC, índice 2
         {"Open": 119, "High": 120, "Low": 116, "Close": 117, "Volume": 300_000},
         {"Open": 117, "High": 118, "Low": 115, "Close": 116, "Volume": 200_000},
     ]
     df = _daily_df(rows)
 
-    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+    result = find_buec(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
 
-    assert result.retest_index == 2
+    assert result.buec_index == 2
     assert result.volume_declining is True
 
 
-def test_find_retest_triggers_on_the_first_candidate_day():
+def test_find_buec_triggers_on_the_first_candidate_day():
     rows = [
         {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},  # ruptura, índice 0
-        {"Open": 121, "High": 122, "Low": 118, "Close": 119, "Volume": 500_000},  # retest el primer día, índice 1
+        {"Open": 121, "High": 122, "Low": 118, "Close": 119, "Volume": 500_000},  # BUEC el primer día, índice 1
     ]
     df = _daily_df(rows)
 
-    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+    result = find_buec(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
 
     assert result is not None
-    assert result.retest_index == 1
+    assert result.buec_index == 1
     assert result.volume_declining is True
 
 
-def test_find_retest_returns_none_without_touching_the_band():
+def test_find_buec_returns_none_without_touching_the_band():
     rows = [{"Open": 130, "High": 132, "Low": 129, "Close": 131, "Volume": 500_000} for _ in range(6)]
     df = _daily_df(rows)
 
-    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+    result = find_buec(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
 
     assert result is None
 
 
-def test_find_retest_triggers_via_no_supply_candle():
+def test_find_buec_triggers_via_no_supply_candle():
     rows = [
         {"Open": 118, "High": 122, "Low": 110, "Close": 121, "Volume": 500_000},    # ruptura, índice 0 (rango 12)
         {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 600_000},    # no toca la banda, índice 1
@@ -174,10 +174,10 @@ def test_find_retest_triggers_via_no_supply_candle():
     ]
     df = _daily_df(rows)
 
-    result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
+    result = find_buec(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
 
     assert result is not None
-    assert result.retest_index == 2
+    assert result.buec_index == 2
     assert result.no_supply is True
     assert result.volume_declining is False
 
@@ -210,11 +210,11 @@ def test_find_entry_1_signal_returns_none_without_a_reentry():
     assert result is None
 
 
-def test_find_entry_3_signal_composes_retest_order_block_and_stop_loss():
+def test_find_entry_3_signal_composes_buec_order_block_and_stop_loss():
     rows = [
         {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},    # ruptura, índice 0
         {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},    # aún no toca la banda, índice 1
-        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2 (bajista)
+        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # BUEC, índice 2 (bajista)
         {"Open": 119, "High": 125, "Low": 118.5, "Close": 124, "Volume": 600_000},   # impulso alcista
     ]
     df = _daily_df(rows)
@@ -229,11 +229,11 @@ def test_find_entry_3_signal_composes_retest_order_block_and_stop_loss():
     assert result.stop_loss == pytest.approx(118)
 
 
-def test_find_entry_3_signal_can_find_a_reinforcing_fvg_after_the_retest():
+def test_find_entry_3_signal_can_find_a_reinforcing_fvg_after_the_buec():
     rows = [
         {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},    # ruptura, índice 0
         {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},    # no toca la banda, índice 1
-        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2
+        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # BUEC, índice 2
         {"Open": 119, "High": 119.5, "Low": 118.5, "Close": 119, "Volume": 300_000}, # vela1 del FVG, índice 3
         {"Open": 119, "High": 135, "Low": 118.8, "Close": 133, "Volume": 900_000},   # vela2 impulso, índice 4
         {"Open": 133, "High": 137, "Low": 131, "Close": 136, "Volume": 500_000},     # vela3, índice 5
@@ -249,7 +249,7 @@ def test_find_entry_3_signal_can_find_a_reinforcing_fvg_after_the_retest():
     assert result.fvg_index == 4
 
 
-def test_find_entry_3_signal_returns_none_without_a_retest():
+def test_find_entry_3_signal_returns_none_without_a_buec():
     rows = [{"Open": 130, "High": 132, "Low": 129, "Close": 131, "Volume": 500_000} for _ in range(6)]
     df = _daily_df(rows)
     atr = pd.Series([1.0] * len(df), index=df.index)
