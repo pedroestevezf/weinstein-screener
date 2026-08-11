@@ -136,6 +136,12 @@ def find_retest(
     """Primera vela, dentro de `window` días tras `breakout_index`, que toca
     la banda `±tolerance` alrededor de `ar_high` con volumen descendente o
     una vela "no supply".
+
+    La comparación de volumen descendente incluye la propia vela de ruptura
+    (`breakout_index`) como primer término — si no se incluyera, una vela
+    de retest que ocurre justo en el primer día tras la ruptura nunca
+    tendría una "vela anterior" con la que compararse y el criterio de
+    volumen descendente no podría dispararse nunca en ese caso.
     """
     band_low = ar_high * (1 - tolerance)
     band_high = ar_high * (1 + tolerance)
@@ -149,16 +155,13 @@ def find_retest(
         if not touches_band:
             continue
 
-        segment = candidates[: position + 1]
-        if len(segment) >= 2:
-            declines = sum(
-                1
-                for k in range(1, len(segment))
-                if df["Volume"].iloc[segment[k]] < df["Volume"].iloc[segment[k - 1]]
-            )
-            volume_declining = (declines / (len(segment) - 1)) >= volume_decline_fraction
-        else:
-            volume_declining = False
+        segment = [breakout_index] + candidates[: position + 1]
+        declines = sum(
+            1
+            for k in range(1, len(segment))
+            if df["Volume"].iloc[segment[k]] < df["Volume"].iloc[segment[k - 1]]
+        )
+        volume_declining = (declines / (len(segment) - 1)) >= volume_decline_fraction
 
         no_supply = _is_no_supply_candle(df, i, no_supply_lookback)
 

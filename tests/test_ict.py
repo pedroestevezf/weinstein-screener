@@ -109,8 +109,8 @@ def test_find_spring_reentry_mss_returns_none_without_an_anchor():
 def test_find_retest_locates_the_retest_with_declining_volume():
     rows = [
         {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},   # ruptura, índice 0
-        {"Open": 121, "High": 123, "Low": 119, "Close": 122, "Volume": 700_000},
-        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},  # retest, índice 2
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},   # aún no toca la banda, índice 1
+        {"Open": 127, "High": 127, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2
         {"Open": 119, "High": 120, "Low": 116, "Close": 117, "Volume": 300_000},
         {"Open": 117, "High": 118, "Low": 115, "Close": 116, "Volume": 200_000},
     ]
