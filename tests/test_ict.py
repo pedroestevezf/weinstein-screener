@@ -129,3 +129,34 @@ def test_find_retest_returns_none_without_touching_the_band():
     result = find_retest(df, ar_high=120, breakout_index=0, window=5, tolerance=0.05)
 
     assert result is None
+
+
+from weinstein_screener.ict import find_entry_1_signal
+
+
+def test_find_entry_1_signal_composes_mss_order_block_and_stop_loss():
+    rows = [{"Open": 105, "High": 107, "Low": 103, "Close": 104, "Volume": 500_000} for _ in range(4)]
+    rows.append({"Open": 102, "High": 103, "Low": 97, "Close": 98, "Volume": 900_000})    # ancla, índice 4
+    rows.append({"Open": 98, "High": 99, "Low": 96, "Close": 97, "Volume": 400_000})      # OB, índice 5
+    rows.append({"Open": 97, "High": 106, "Low": 96.5, "Close": 105, "Volume": 800_000})  # reingreso, índice 6
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_1_signal(df, sc_low=100, search_start=0, atr=atr, window=5)
+
+    assert result is not None
+    assert result.trigger_index == 6
+    assert result.order_block_index == 5
+    assert result.entry_price == pytest.approx(99)
+    assert result.stop_loss == pytest.approx(96.75)
+    assert result.high_confidence is False
+
+
+def test_find_entry_1_signal_returns_none_without_a_reentry():
+    rows = [{"Open": 105, "High": 107, "Low": 103, "Close": 104, "Volume": 500_000} for _ in range(10)]
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_1_signal(df, sc_low=100, search_start=0, atr=atr, window=5)
+
+    assert result is None

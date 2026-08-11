@@ -169,3 +169,62 @@ def find_retest(
             return RetestResult(retest_index=i, volume_declining=volume_declining, no_supply=no_supply)
 
     return None
+
+
+@dataclass
+class EntrySignal:
+    trigger_index: int
+    order_block_index: int | None
+    fvg_index: int | None
+    entry_price: float | None
+    stop_loss: float | None
+    high_confidence: bool
+
+
+def find_entry_1_signal(
+    df_daily: pd.DataFrame,
+    sc_low: float,
+    search_start: int,
+    atr: pd.Series,
+    window: int = 5,
+    ob_lookback: int = 10,
+    sl_buffer_atr: float = 0.25,
+    fvg_body_multiplier: float = 1.5,
+    fvg_body_lookback: int = 20,
+    fvg_gap_range_fraction: float = 0.2,
+) -> EntrySignal | None:
+    """Compone el disparador de la Entrada 1 (Spring): reingreso al rango,
+    Order Block, y FVG opcional como refuerzo. None si no hay reingreso o
+    no hay Order Block.
+    """
+    reentry = find_spring_reentry_mss(df_daily, sc_low, search_start, window)
+    if reentry is None:
+        return None
+
+    order_block_index = find_order_block(df_daily, reentry.reentry_index, ob_lookback)
+    if order_block_index is None:
+        return None
+
+    fvg_index = None
+    if reentry.reentry_index - reentry.anchor_index >= 2:
+        fvg_index = find_fair_value_gap(
+            df_daily,
+            reentry.anchor_index,
+            reentry.reentry_index,
+            atr,
+            fvg_body_multiplier,
+            fvg_body_lookback,
+            fvg_gap_range_fraction,
+        )
+
+    entry_price = df_daily["High"].iloc[order_block_index]
+    stop_loss = df_daily["Low"].iloc[reentry.anchor_index] - sl_buffer_atr * atr.iloc[reentry.anchor_index]
+
+    return EntrySignal(
+        trigger_index=reentry.reentry_index,
+        order_block_index=order_block_index,
+        fvg_index=fvg_index,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        high_confidence=reentry.high_confidence,
+    )
