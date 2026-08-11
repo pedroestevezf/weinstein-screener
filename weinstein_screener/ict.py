@@ -79,6 +79,11 @@ def find_spring_reentry_mss(
     ambos dentro de una ventana de `window` días cada uno desde `search_start`.
     `high_confidence` marca si, tras el reingreso, el precio retestea sc_low
     de nuevo dentro de otra ventana de `window` días.
+
+    NOTA: este "retest" es el redescenso hacia el mínimo del Spring tras el
+    reingreso (Entrada 1) — NO es el BUEC (ver find_buec en este mismo
+    módulo), que es el reteste de la resistencia rota desde arriba tras el
+    JAC. Son eventos distintos; no unificar los nombres.
     """
     anchor_index = None
     for i in range(search_start, min(len(df), search_start + window)):

@@ -100,14 +100,26 @@ class ExitSignal:
 
 def evaluate_exit_signal(
     current_close: float,
-    range_target: float,
+    range_target: float | None,
     current_week_close_above_ma: bool,
 ) -> ExitSignal:
     """Señal de salida: parcial al alcanzar el objetivo de amplitud de
-    rango, total al perder la MA30w (independientemente de si se ha
-    alcanzado o no el objetivo — la invalidación de régimen manda).
+    rango, total al perder la MA30w. Ambos flags se calculan de forma
+    independiente -- `full_exit` puede ser True aunque también se haya
+    alcanzado el objetivo parcial (y viceversa), porque la invalidación
+    de régimen manda sobre la gestión táctica de beneficios.
+
+    `range_target` puede ser None (`project_range_target`, Task 4, lo
+    devuelve así con datos inconsistentes) -- en ese caso
+    `partial_take_profit` es simplemente False, pero `full_exit` sigue
+    evaluándose con normalidad.
     """
+    partial_take_profit = range_target is not None and current_close >= range_target
     return ExitSignal(
-        partial_take_profit=current_close >= range_target,
+        # `current_close >= range_target` yields numpy.bool_ when either
+        # operand is a numpy-derived float (e.g. from a pandas Series), which
+        # violates the `bool` type contract of ExitSignal -- coerce to a
+        # genuine Python bool.
+        partial_take_profit=bool(partial_take_profit),
         full_exit=not current_week_close_above_ma,
     )
