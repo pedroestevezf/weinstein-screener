@@ -724,7 +724,7 @@ from weinstein_screener.ict import find_entry_3_signal
 def test_find_entry_3_signal_composes_retest_order_block_and_stop_loss():
     rows = [
         {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},    # ruptura, índice 0
-        {"Open": 121, "High": 123, "Low": 119, "Close": 122, "Volume": 700_000},
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},    # aún no toca la banda, índice 1
         {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2 (bajista)
         {"Open": 119, "High": 125, "Low": 118.5, "Close": 124, "Volume": 600_000},   # impulso alcista
     ]
