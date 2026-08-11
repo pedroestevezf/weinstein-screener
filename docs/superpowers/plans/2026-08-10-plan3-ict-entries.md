@@ -434,8 +434,8 @@ from weinstein_screener.ict import find_retest
 def test_find_retest_locates_the_retest_with_declining_volume():
     rows = [
         {"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 900_000},   # ruptura, índice 0
-        {"Open": 121, "High": 123, "Low": 119, "Close": 122, "Volume": 700_000},
-        {"Open": 122, "High": 122.5, "Low": 118, "Close": 119, "Volume": 500_000},  # retest, índice 2
+        {"Open": 128, "High": 130, "Low": 127, "Close": 129, "Volume": 700_000},   # aún no toca la banda, índice 1
+        {"Open": 127, "High": 127, "Low": 118, "Close": 119, "Volume": 500_000},   # retest, índice 2
         {"Open": 119, "High": 120, "Low": 116, "Close": 117, "Volume": 300_000},
         {"Open": 117, "High": 118, "Low": 115, "Close": 116, "Volume": 200_000},
     ]
@@ -510,6 +510,12 @@ def find_retest(
     """Primera vela, dentro de `window` días tras `breakout_index`, que toca
     la banda `±tolerance` alrededor de `ar_high` con volumen descendente o
     una vela "no supply".
+
+    La comparación de volumen descendente incluye la propia vela de ruptura
+    (`breakout_index`) como primer término — si no se incluyera, una vela
+    de retest que ocurre justo en el primer día tras la ruptura nunca
+    tendría una "vela anterior" con la que compararse y el criterio de
+    volumen descendente no podría dispararse nunca en ese caso.
     """
     band_low = ar_high * (1 - tolerance)
     band_high = ar_high * (1 + tolerance)
@@ -523,16 +529,13 @@ def find_retest(
         if not touches_band:
             continue
 
-        segment = candidates[: position + 1]
-        if len(segment) >= 2:
-            declines = sum(
-                1
-                for k in range(1, len(segment))
-                if df["Volume"].iloc[segment[k]] < df["Volume"].iloc[segment[k - 1]]
-            )
-            volume_declining = (declines / (len(segment) - 1)) >= volume_decline_fraction
-        else:
-            volume_declining = False
+        segment = [breakout_index] + candidates[: position + 1]
+        declines = sum(
+            1
+            for k in range(1, len(segment))
+            if df["Volume"].iloc[segment[k]] < df["Volume"].iloc[segment[k - 1]]
+        )
+        volume_declining = (declines / (len(segment) - 1)) >= volume_decline_fraction
 
         no_supply = _is_no_supply_candle(df, i, no_supply_lookback)
 
