@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from weinstein_screener.ict import find_fair_value_gap, find_order_block
+from weinstein_screener.ict import find_fair_value_gap, find_order_block, find_spring_reentry_mss
 
 
 def _daily_df(rows):
@@ -62,5 +62,45 @@ def test_find_fair_value_gap_returns_none_when_wicks_overlap():
     atr = pd.Series([1.5] * len(df), index=df.index)
 
     result = find_fair_value_gap(df, start_index=0, end_index=len(df) - 1, atr=atr)
+
+    assert result is None
+
+
+def test_find_spring_reentry_mss_locates_anchor_and_reentry():
+    rows = [{"Open": 105, "High": 107, "Low": 103, "Close": 104, "Volume": 500_000} for _ in range(4)]
+    rows.append({"Open": 102, "High": 103, "Low": 97, "Close": 98, "Volume": 900_000})    # ancla, índice 4
+    rows.append({"Open": 98, "High": 99, "Low": 96, "Close": 97, "Volume": 400_000})      # índice 5
+    rows.append({"Open": 97, "High": 106, "Low": 96.5, "Close": 105, "Volume": 800_000})  # reingreso, índice 6
+    rows.append({"Open": 106, "High": 110, "Low": 105, "Close": 109, "Volume": 600_000})
+    rows.append({"Open": 109, "High": 112, "Low": 108, "Close": 111, "Volume": 500_000})
+    df = _daily_df(rows)
+
+    result = find_spring_reentry_mss(df, sc_low=100, search_start=0, window=5)
+
+    assert result.anchor_index == 4
+    assert result.reentry_index == 6
+    assert result.high_confidence is False
+
+
+def test_find_spring_reentry_mss_flags_high_confidence_on_a_post_reentry_retest():
+    rows = [{"Open": 105, "High": 107, "Low": 103, "Close": 104, "Volume": 500_000} for _ in range(4)]
+    rows.append({"Open": 102, "High": 103, "Low": 97, "Close": 98, "Volume": 900_000})
+    rows.append({"Open": 98, "High": 99, "Low": 96, "Close": 97, "Volume": 400_000})
+    rows.append({"Open": 97, "High": 106, "Low": 96.5, "Close": 105, "Volume": 800_000})  # reingreso, índice 6
+    rows.append({"Open": 106, "High": 107, "Low": 101, "Close": 102, "Volume": 400_000})  # retest tras reingreso, índice 7
+    rows.append({"Open": 102, "High": 108, "Low": 101.5, "Close": 107, "Volume": 700_000})
+    df = _daily_df(rows)
+
+    result = find_spring_reentry_mss(df, sc_low=100, search_start=0, window=5)
+
+    assert result.reentry_index == 6
+    assert result.high_confidence is True
+
+
+def test_find_spring_reentry_mss_returns_none_without_an_anchor():
+    rows = [{"Open": 105, "High": 107, "Low": 103, "Close": 104, "Volume": 500_000} for _ in range(10)]
+    df = _daily_df(rows)
+
+    result = find_spring_reentry_mss(df, sc_low=100, search_start=0, window=5)
 
     assert result is None

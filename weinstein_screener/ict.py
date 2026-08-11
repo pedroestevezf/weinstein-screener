@@ -5,6 +5,13 @@ from dataclasses import dataclass
 import pandas as pd
 
 
+@dataclass
+class SpringReentry:
+    anchor_index: int
+    reentry_index: int
+    high_confidence: bool
+
+
 def find_order_block(df: pd.DataFrame, impulse_end_index: int, lookback: int = 10) -> int | None:
     """Última vela bajista (Close < Open) antes de `impulse_end_index`, buscando
     hacia atrás dentro de `lookback` velas. Devuelve None si no hay ninguna.
@@ -50,3 +57,39 @@ def find_fair_value_gap(
         return i
 
     return None
+
+
+def find_spring_reentry_mss(
+    df: pd.DataFrame,
+    sc_low: float,
+    search_start: int,
+    window: int = 5,
+    retest_tolerance: float = 0.02,
+) -> SpringReentry | None:
+    """Ancla (ruptura de sc_low) + reingreso (cierre de vuelta sobre sc_low),
+    ambos dentro de una ventana de `window` días cada uno desde `search_start`.
+    `high_confidence` marca si, tras el reingreso, el precio retestea sc_low
+    de nuevo dentro de otra ventana de `window` días.
+    """
+    anchor_index = None
+    for i in range(search_start, min(len(df), search_start + window)):
+        if df["Low"].iloc[i] < sc_low:
+            anchor_index = i
+            break
+    if anchor_index is None:
+        return None
+
+    reentry_index = None
+    for i in range(anchor_index + 1, min(len(df), anchor_index + 1 + window)):
+        if df["Close"].iloc[i] > sc_low:
+            reentry_index = i
+            break
+    if reentry_index is None:
+        return None
+
+    retest_end = min(len(df), reentry_index + 1 + window)
+    high_confidence = any(
+        df["Low"].iloc[j] <= sc_low * (1 + retest_tolerance) for j in range(reentry_index + 1, retest_end)
+    )
+
+    return SpringReentry(anchor_index=anchor_index, reentry_index=reentry_index, high_confidence=high_confidence)
