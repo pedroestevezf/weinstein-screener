@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import sys
 from pathlib import Path
 
@@ -25,6 +26,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from weinstein_screener.etapa1 import run_etapa1_screen
 from weinstein_screener.universe import get_us_universe
+
+# Umbral simple y documentado para distinguir "corrida degradada por fallos"
+# de "corrida limpia con pocos/ningún candidato real". Cualquiera de las dos
+# condiciones basta para considerar la corrida fallida.
+MAX_BATCH_FAILURE_RATE = 0.2
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -61,23 +67,58 @@ def main(argv: list[str] | None = None) -> None:
     if args.limit is not None:
         tickers = tickers[: args.limit]
 
-    candidates = run_etapa1_screen(
+    result = run_etapa1_screen(
         tickers,
         batch_size=args.batch_size,
         distance_pct_threshold=args.distance_pct,
         ma_window=args.ma_window,
         slope_lookback=args.slope_lookback,
     )
+    candidates = result.candidates
+
+    total_batches = math.ceil(len(tickers) / args.batch_size) if tickers else 0
+    batch_failure_rate = (result.batches_failed / total_batches) if total_batches else 0.0
+    run_failed = batch_failure_rate > MAX_BATCH_FAILURE_RATE or (
+        result.tickers_attempted > 0 and result.tickers_screened == 0
+    )
 
     output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["ticker", "distance_pct", "ma_rising"])
-        for candidate in candidates:
-            writer.writerow([candidate.ticker, candidate.distance_pct, candidate.ma_rising])
+    if run_failed and not candidates:
+        # No sobrescribir una shortlist previa buena con un resultado vacío
+        # cuando hay indicios claros de que la corrida falló (no cuando el
+        # mercado genuinamente no ofrece candidatos ahora mismo).
+        print(
+            f"AVISO: no se escribe {output_path} — 0 candidatos y la corrida "
+            "parece haber fallado (ver detalle de fallos abajo), se conserva "
+            "la shortlist existente si la hay.",
+            file=sys.stderr,
+        )
+    else:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["ticker", "distance_pct", "ma_rising"])
+            for candidate in candidates:
+                writer.writerow(
+                    [candidate.ticker, candidate.distance_pct, candidate.ma_rising]
+                )
 
-    print(f"{len(candidates)} candidatos de {len(tickers)} tickers screenados")
+    print(
+        f"{len(candidates)} candidatos de {result.tickers_screened} tickers screenados "
+        f"({result.tickers_attempted} intentados, "
+        f"{result.batches_failed}/{total_batches} lotes fallidos)"
+    )
+
+    if run_failed:
+        print(
+            "AVISO: tasa de fallos alta en la corrida de Etapa 1 "
+            f"({result.batches_failed}/{total_batches} lotes fallidos = "
+            f"{batch_failure_rate:.0%}, {result.tickers_screened}/"
+            f"{result.tickers_attempted} tickers screenados exitosamente) "
+            "— posible fallo de la fuente de datos.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -161,8 +161,11 @@ def test_run_etapa1_screen_batches_and_combines_results_across_calls():
     assert calls[1] == ["CCC", "DDD"]
     assert calls[2] == ["EEE"]
 
-    result_tickers = {c.ticker for c in result}
+    result_tickers = {c.ticker for c in result.candidates}
     assert result_tickers == set(tickers)
+    assert result.tickers_attempted == 5
+    assert result.tickers_screened == 5
+    assert result.batches_failed == 0
 
 
 def test_run_etapa1_screen_skips_ticker_missing_from_batch_result():
@@ -177,9 +180,12 @@ def test_run_etapa1_screen_skips_ticker_missing_from_batch_result():
         ["XXX", "YYY"], batch_size=2, ma_window=10, downloader=fake_downloader
     )
 
-    result_tickers = {c.ticker for c in result}
+    result_tickers = {c.ticker for c in result.candidates}
     assert "YYY" not in result_tickers
     assert "XXX" in result_tickers
+    assert result.tickers_attempted == 2
+    assert result.tickers_screened == 1  # solo XXX llega a screen_ticker
+    assert result.batches_failed == 0
 
 
 def test_run_etapa1_screen_skips_whole_batch_on_downloader_exception():
@@ -195,8 +201,11 @@ def test_run_etapa1_screen_skips_whole_batch_on_downloader_exception():
         ["BAD", "GOOD1", "GOOD2"], batch_size=1, ma_window=10, downloader=fake_downloader
     )
 
-    result_tickers = {c.ticker for c in result}
+    result_tickers = {c.ticker for c in result.candidates}
     assert result_tickers == {"GOOD1", "GOOD2"}
+    assert result.tickers_attempted == 3
+    assert result.tickers_screened == 2
+    assert result.batches_failed == 1  # batch_size=1 -> el lote de "BAD" es el único fallido
 
 
 def test_run_etapa1_screen_handles_multiindex_and_flat_column_shapes():
@@ -214,8 +223,30 @@ def test_run_etapa1_screen_handles_multiindex_and_flat_column_shapes():
         ["CCC"], batch_size=1, ma_window=10, downloader=fake_downloader
     )
 
-    assert {c.ticker for c in multi_result} == {"AAA", "BBB"}
-    assert {c.ticker for c in single_result} == {"CCC"}
+    assert {c.ticker for c in multi_result.candidates} == {"AAA", "BBB"}
+    assert {c.ticker for c in single_result.candidates} == {"CCC"}
+
+
+def test_run_etapa1_screen_treats_flat_columns_as_failed_batch_when_chunk_has_multiple_tickers():
+    # FIX 1: si un lote de >1 ticker devuelve columnas PLANAS (no MultiIndex),
+    # la forma de la respuesta no coincide con el pedido -> no hay manera
+    # segura de saber a qué ticker pertenece cada fila. Antes esto atribuía
+    # silenciosamente el MISMO frame a todos los tickers del lote. Debe
+    # tratarse como lote fallido (se omite entero), no como candidatos válidos.
+    closes = _rising_candidate_closes()
+
+    def fake_downloader(chunk, period, interval):
+        # Respuesta malformada: columnas planas pese a pedir 2 tickers.
+        return _weekly_df(closes)
+
+    result = run_etapa1_screen(
+        ["AAA", "BBB"], batch_size=2, ma_window=10, downloader=fake_downloader
+    )
+
+    assert result.candidates == []
+    assert result.tickers_screened == 0
+    assert result.tickers_attempted == 2
+    assert result.batches_failed == 1
 
 
 def test_run_etapa1_screen_sorts_candidates_by_distance_pct_ascending():
@@ -239,8 +270,8 @@ def test_run_etapa1_screen_sorts_candidates_by_distance_pct_ascending():
         downloader=fake_downloader,
     )
 
-    assert [c.ticker for c in result] == ["NEAR", "MID", "FAR"]
-    distances = [c.distance_pct for c in result]
+    assert [c.ticker for c in result.candidates] == ["NEAR", "MID", "FAR"]
+    distances = [c.distance_pct for c in result.candidates]
     assert distances == sorted(distances)
 
 
@@ -266,9 +297,12 @@ def test_run_etapa1_screen_isolates_ticker_when_screen_ticker_raises(monkeypatch
         ["BAD", "GOOD1", "GOOD2"], batch_size=3, ma_window=10, downloader=fake_downloader
     )
 
-    result_tickers = {c.ticker for c in result}
+    result_tickers = {c.ticker for c in result.candidates}
     assert "BAD" not in result_tickers
     assert {"GOOD1", "GOOD2"} <= result_tickers
+    assert result.tickers_attempted == 3
+    assert result.tickers_screened == 2  # BAD lanza excepción antes de contarse
+    assert result.batches_failed == 0
 
 
 def test_run_etapa1_screen_excludes_non_candidates():
@@ -284,6 +318,8 @@ def test_run_etapa1_screen_excludes_non_candidates():
         ["YES", "NO"], batch_size=2, ma_window=10, downloader=fake_downloader
     )
 
-    result_tickers = {c.ticker for c in result}
+    result_tickers = {c.ticker for c in result.candidates}
     assert "YES" in result_tickers
     assert "NO" not in result_tickers
+    # "NO" sí se screenea con éxito (no es un fallo), simplemente no es candidato.
+    assert result.tickers_screened == 2
