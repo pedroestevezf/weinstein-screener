@@ -202,6 +202,40 @@ def test_filter_common_stock_excludes_acquisition_corp_ordinary_share():
     assert filter_common_stock(records) == []
 
 
+def test_parse_other_listed_normalizes_dot_form_dual_class_symbol_to_dash():
+    # "ACT Symbol" en notación de punto ("BRK.A") no matchea la convención de
+    # guion de Yahoo Finance ("BRK-A") y queda silenciosamente sin datos
+    # aguas abajo si no se normaliza aquí.
+    text = "\n".join(
+        [
+            "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol",
+            "BRK.A|Berkshire Hathaway Inc. Class A Common Stock|N|BRK.A|N|100|N|BRK.A",
+        ]
+    )
+
+    records = parse_other_listed(text)
+
+    assert records == [
+        SymbolRecord(
+            symbol="BRK-A",
+            name="Berkshire Hathaway Inc. Class A Common Stock",
+            test_issue=False,
+            etf=False,
+        )
+    ]
+
+
+def test_filter_common_stock_excludes_dollar_form_preferred_symbol_regardless_of_name():
+    # Notación CQS "$" (p.ej. "BAC$L") indica acciones preferentes / clases
+    # especiales, no acciones comunes — y su Security Name no siempre
+    # contiene la palabra "preferred", así que el filtro de nombre no basta.
+    records = [
+        SymbolRecord(symbol="BAC$L", name="Bank of America Corp", test_issue=False, etf=False)
+    ]
+
+    assert filter_common_stock(records) == []
+
+
 def test_filter_common_stock_excludes_test_issue_regardless_of_name():
     records = [
         SymbolRecord(symbol="AAPL", name="Apple Inc. - Common Stock", test_issue=True, etf=False)

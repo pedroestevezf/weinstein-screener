@@ -102,6 +102,13 @@ def parse_other_listed(text: str) -> list[SymbolRecord]:
             continue
         if _is_trailer_row(symbol, name):
             continue
+        if "." in symbol:
+            # Símbolos de clase dual en notación de punto (p.ej. "BRK.A",
+            # "BF.B") no matchean la convención de guion de Yahoo Finance
+            # ("BRK-A") y quedan silenciosamente sin datos aguas abajo.
+            # Normalizamos aquí en vez de depender de la columna "NASDAQ
+            # Symbol" (su semántica varía entre filas).
+            symbol = symbol.replace(".", "-")
         records.append(
             SymbolRecord(
                 symbol=symbol,
@@ -114,12 +121,18 @@ def parse_other_listed(text: str) -> list[SymbolRecord]:
 
 
 def filter_common_stock(records: list[SymbolRecord]) -> list[str]:
-    """Filtra a tickers de acciones comunes: descarta test issues, ETFs y nombres
-    que matcheen el patrón de instrumentos no-equity (units, warrants, rights, etc.)."""
+    """Filtra a tickers de acciones comunes: descarta test issues, ETFs, símbolos
+    con notación CQS de preferentes/otras clases especiales ("$", p.ej. "BAC$L",
+    "NEE$U" — no son acciones comunes y su Security Name no siempre contiene la
+    palabra "preferred"), y nombres que matcheen el patrón de instrumentos
+    no-equity (units, warrants, rights, etc.)."""
     return [
         r.symbol
         for r in records
-        if not r.test_issue and not r.etf and not _EXCLUDE_NAME_PATTERN.search(r.name)
+        if not r.test_issue
+        and not r.etf
+        and "$" not in r.symbol
+        and not _EXCLUDE_NAME_PATTERN.search(r.name)
     ]
 
 
