@@ -27,7 +27,7 @@ El usuario propuso un tercer criterio, más suelto que `no_supply`: una vela con
 - `BuecResult`: añadir campo `low_volume: bool`.
 - `_is_low_volume_candle(df, index, lookback=10, fraction=0.5) -> bool`: nueva función pura, mismo estilo que `_is_no_supply_candle` (usa `.iloc`, sin mirar hacia adelante).
 - `find_buec(...)`: nuevo parámetro `low_volume_fraction: float = 0.5`. Reutiliza la misma ventana `no_supply_lookback` para `_is_low_volume_candle` (no se añade un lookback separado — mismo espíritu de reutilización que ya aplica `no_supply_lookback` a `_is_no_supply_candle`). El disparo pasa de `volume_declining or no_supply` a `volume_declining or no_supply or low_volume`.
-- `find_entry_3_signal(...)`: nuevo parámetro `low_volume_fraction: float = 0.5`, propagado a `find_buec`. **Decisión**: `high_confidence` pasa de `buec.no_supply` a `buec.no_supply or buec.low_volume` — un BUEC confirmado por ausencia real de vendedores (por cualquiera de las dos rutas de "poco volumen") es la señal de mayor calidad de las tres, igual que ya trataba `no_supply` en solitario.
+- `find_entry_3_signal(...)`: nuevo parámetro `low_volume_fraction: float = 0.5`, propagado a `find_buec`. **Decisión inicial, superada — ver Addendum**: `high_confidence` iba a pasar de `buec.no_supply` a `buec.no_supply or buec.low_volume`. La revisión final encontró que esto admitía velas de distribución reales; la decisión final usa un criterio dedicado (`_is_high_confidence_buec_candle`), no `buec.low_volume` directamente.
 
 ### Compatibilidad
 
@@ -47,5 +47,5 @@ Implementar los cambios de diseño anteriores en `weinstein_screener/ict.py`, co
 - Vela con volumen muy bajo (≤50% de la mediana de las 10 previas) que toca la banda, sin ser rango estrecho ni bajista → antes `None`, ahora `BuecResult(low_volume=True, ...)`.
 - Vela con volumen normal (>50% de la mediana) que toca la banda y no cumple ningún otro criterio → sigue `None`.
 - Caso con un pico de volumen dentro de la ventana de 10 semanas previas → la mediana (no la media) determina el resultado (test de regresión directo sobre `_is_low_volume_candle`, con el mismo escenario numérico verificado arriba).
-- `find_entry_3_signal`: `high_confidence=True` cuando el BUEC se confirma solo por `low_volume` (sin `no_supply`).
+- `find_entry_3_signal`: `high_confidence=True` cuando el BUEC se confirma solo por `low_volume` (sin `no_supply`). **Superado por el Addendum**: `high_confidence` ya no depende directamente de `buec.low_volume` — el test real cubre `_is_high_confidence_buec_candle` en su lugar.
 - Los tests existentes de `test_ict.py` siguen pasando sin modificación.
