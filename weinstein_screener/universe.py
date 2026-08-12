@@ -33,11 +33,30 @@ def _bool_flag(value: str) -> bool:
     return value.strip().upper() == "Y"
 
 
+def _is_trailer_row(symbol: str, name: str) -> bool:
+    """True si el registro parseado corresponde en realidad a la fila de pie
+    ("File Creation Time: ...") en vez de un dato real.
+
+    La fila de pie real viene pipe-padded hasta el mismo número de campos que
+    una fila de datos (p.ej. "File Creation Time: 0812202612:11|||||||" para
+    el formato de 8 columnas), así que un guard de `len(fields) != 8` NO la
+    detecta: se parsea como un SymbolRecord con symbol="File Creation Time:
+    ..." y name="" (los demás campos quedan vacíos por el padding). Se
+    detecta por dos señales independientes, cualquiera de las dos basta:
+    el símbolo empieza literalmente con el texto de la fila de pie, o el
+    nombre viene vacío (ninguna fila de datos real tiene `Security Name`
+    vacío).
+    """
+    return symbol.startswith("File Creation Time") or not name
+
+
 def parse_nasdaq_listed(text: str) -> list[SymbolRecord]:
     """Parsea nasdaqlisted.txt (columnas: Symbol|Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares).
 
     Ignora la fila de cabecera y la fila de pie ("File Creation Time: ...") sin
-    lanzar excepción: cualquier línea que no tenga exactamente 8 campos se descarta.
+    lanzar excepción: cualquier línea que no tenga exactamente 8 campos se descarta,
+    y adicionalmente se descarta cualquier fila que parezca ser la fila de pie
+    pipe-padded (ver `_is_trailer_row`).
     """
     records: list[SymbolRecord] = []
     lines = text.splitlines()
@@ -46,12 +65,16 @@ def parse_nasdaq_listed(text: str) -> list[SymbolRecord]:
         if len(fields) != 8:
             continue  # fila de pie u otra línea no-datos
         symbol, name, _market_category, test_issue, _financial_status, _round_lot, etf, _next_shares = fields
+        symbol = symbol.strip()
+        name = name.strip()
         if not symbol:
+            continue
+        if _is_trailer_row(symbol, name):
             continue
         records.append(
             SymbolRecord(
-                symbol=symbol.strip(),
-                name=name.strip(),
+                symbol=symbol,
+                name=name,
                 test_issue=_bool_flag(test_issue),
                 etf=_bool_flag(etf),
             )
@@ -63,6 +86,8 @@ def parse_other_listed(text: str) -> list[SymbolRecord]:
     """Parsea otherlisted.txt (columnas: ACT Symbol|Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol).
 
     Nótese que ETF y Test Issue están en posiciones distintas que en nasdaqlisted.txt.
+    Igual que en `parse_nasdaq_listed`, se descarta también la fila de pie
+    pipe-padded vía `_is_trailer_row` (el guard de `len(fields) != 8` no basta).
     """
     records: list[SymbolRecord] = []
     lines = text.splitlines()
@@ -71,12 +96,16 @@ def parse_other_listed(text: str) -> list[SymbolRecord]:
         if len(fields) != 8:
             continue  # fila de pie u otra línea no-datos
         symbol, name, _exchange, _cqs_symbol, etf, _round_lot, test_issue, _nasdaq_symbol = fields
+        symbol = symbol.strip()
+        name = name.strip()
         if not symbol:
+            continue
+        if _is_trailer_row(symbol, name):
             continue
         records.append(
             SymbolRecord(
-                symbol=symbol.strip(),
-                name=name.strip(),
+                symbol=symbol,
+                name=name,
                 test_issue=_bool_flag(test_issue),
                 etf=_bool_flag(etf),
             )

@@ -9,13 +9,16 @@ from weinstein_screener.universe import (
     parse_other_listed,
 )
 
+# Trailer line real: pipe-padded al número total de columnas del formato (8),
+# no un único campo suelto — "File Creation Time: ...|||||||" (7 pipes -> 8
+# campos). `len(fields) != 8` NO detecta esto (ver FIX 2 del review final).
 NASDAQ_LISTED_FIXTURE = "\n".join(
     [
         "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares",
         "AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N",
         "ZWZZT|Test Issue Symbol|Q|Y|N|100|N|N",
         "QQQ|Invesco QQQ Trust|Q|N|N|100|Y|N",
-        "File Creation Time: 0812202606:00",
+        "File Creation Time: 0812202606:00|||||||",
     ]
 )
 
@@ -24,7 +27,7 @@ OTHER_LISTED_FIXTURE = "\n".join(
         "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol",
         "A|Agilent Technologies, Inc. Common Stock|N|A|N|100|N|A",
         "ZTEST|Some Test Symbol|N|ZTEST|N|100|Y|ZTEST",
-        "File Creation Time: 0812202606:00",
+        "File Creation Time: 0812202606:00|||||||",
     ]
 )
 
@@ -63,6 +66,40 @@ def test_parse_other_listed_drops_trailer_row():
 
     symbols = [r.symbol for r in records]
     assert "File Creation Time: 0812202606:00" not in symbols
+
+
+def test_parse_nasdaq_listed_drops_trailer_row_with_different_padding_width():
+    # La detección no debe depender de cuántos pipes exactos trae el trailer
+    # real (puede variar); confirma que se detecta también con un padding
+    # distinto al de la fixture principal.
+    text = "\n".join(
+        [
+            "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares",
+            "AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N",
+            "File Creation Time: 0812202612:11||||||",
+        ]
+    )
+
+    records = parse_nasdaq_listed(text)
+
+    assert [r.symbol for r in records] == ["AAPL"]
+
+
+def test_parse_nasdaq_listed_drops_any_row_with_blank_name():
+    # Segunda señal de detección independiente del prefijo de texto: un
+    # registro con name en blanco nunca es un dato real y debe descartarse
+    # aunque el símbolo no empiece por "File Creation Time".
+    text = "\n".join(
+        [
+            "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares",
+            "AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N",
+            "JUNK||Q|N|N|100|N|N",
+        ]
+    )
+
+    records = parse_nasdaq_listed(text)
+
+    assert [r.symbol for r in records] == ["AAPL"]
 
 
 def test_filter_common_stock_keeps_normal_common_stock_names():
