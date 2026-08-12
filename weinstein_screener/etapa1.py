@@ -18,6 +18,29 @@ class Etapa1Candidate:
     is_candidate: bool
 
 
+def _drop_unclosed_current_week(df_weekly: pd.DataFrame) -> pd.DataFrame:
+    """Descarta la última fila de `df_weekly` si corresponde a una semana que
+    todavía no ha cerrado del todo.
+
+    `yf.download(..., interval="1wk")` devuelve la semana en curso (parcial)
+    como última fila cuando se ejecuta a mitad de semana. Por convención de
+    este proyecto el índice de una barra semanal es el INICIO del periodo
+    (lunes, "W-MON"). Una semana está cerrada una vez ha transcurrido tiempo
+    real hasta pasado su domingo (barra que empieza el lunes D cierra al
+    llegar al lunes D+7). Se usa la hora real del sistema porque esto es
+    código de aplicación normal (screening), no un script de flujo de
+    trabajo replayable. Ante el caso límite (justo en el domingo de cierre),
+    se prefiere descartar la fila por precaución antes que arriesgarse a
+    evaluar sobre datos todavía no definitivos.
+    """
+    if len(df_weekly) == 0:
+        return df_weekly
+    last_week_start = df_weekly.index[-1]
+    if last_week_start + pd.Timedelta(days=6) >= pd.Timestamp.now().normalize():
+        return df_weekly.iloc[:-1]
+    return df_weekly
+
+
 def screen_ticker(
     ticker: str,
     df_weekly: pd.DataFrame,
@@ -28,8 +51,11 @@ def screen_ticker(
     """Evalúa Etapa 1 (pre-screening grueso) para un ticker sobre la última
     semana cerrada de `df_weekly`: distancia porcentual del precio a la
     MA30w y si esa media tiene pendiente ascendente. `None` si no hay
-    histórico suficiente para calcular la MA (`len(df_weekly) < ma_window`).
+    histórico suficiente para calcular la MA (`len(df_weekly) < ma_window`)
+    una vez descartada la semana en curso todavía no cerrada.
     """
+    df_weekly = _drop_unclosed_current_week(df_weekly)
+
     if len(df_weekly) < ma_window:
         return None
 

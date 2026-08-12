@@ -87,6 +87,40 @@ def test_screen_ticker_returns_none_with_insufficient_history():
     assert result is None
 
 
+def test_screen_ticker_excludes_in_progress_current_week():
+    # yf.download con interval="1wk" devuelve la semana en curso (parcial)
+    # como última fila cuando se ejecuta a mitad de semana. screen_ticker
+    # debe evaluar sobre la última semana CERRADA, no sobre esa fila.
+    now = pd.Timestamp.now().normalize()
+    this_monday = now - pd.Timedelta(days=now.weekday())
+    dates = pd.date_range(end=this_monday, periods=41, freq="W-MON")
+    # Las primeras 40 semanas suben de forma constante; la última (semana en
+    # curso, todavía no cerrada) tiene un salto brutal que, si se incluyera,
+    # cambiaría claramente distance_pct/ma_rising respecto a excluirla.
+    closes = [100.0 + i * 2 for i in range(40)] + [5000.0]
+    df = pd.DataFrame(
+        {
+            "Open": closes,
+            "High": [c + 1 for c in closes],
+            "Low": [c - 1 for c in closes],
+            "Close": closes,
+            "Volume": [1000] * len(closes),
+        },
+        index=dates,
+    )
+
+    result = screen_ticker("ZZZ", df, distance_pct_threshold=7.5, ma_window=10, slope_lookback=4)
+    expected = screen_ticker(
+        "ZZZ", df.iloc[:-1], distance_pct_threshold=7.5, ma_window=10, slope_lookback=4
+    )
+
+    assert result is not None
+    assert expected is not None
+    assert result.distance_pct == pytest.approx(expected.distance_pct)
+    assert result.ma_rising == expected.ma_rising
+    assert result.distance_pct < 1000  # sanity: el salto de la última fila no se usó
+
+
 def test_screen_ticker_distance_pct_is_numerically_correct():
     # 9 semanas planas en 100 + última semana en 121 -> MA(10) = (9*100 + 121)/10 = 102.1
     # distance = |121 - 102.1| / 102.1 * 100
