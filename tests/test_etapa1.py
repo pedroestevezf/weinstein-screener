@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+import weinstein_screener.etapa1 as etapa1
 from weinstein_screener.etapa1 import run_etapa1_screen, screen_ticker
 
 
@@ -207,6 +208,33 @@ def test_run_etapa1_screen_sorts_candidates_by_distance_pct_ascending():
     assert [c.ticker for c in result] == ["NEAR", "MID", "FAR"]
     distances = [c.distance_pct for c in result]
     assert distances == sorted(distances)
+
+
+def test_run_etapa1_screen_isolates_ticker_when_screen_ticker_raises(monkeypatch):
+    # A ticker that reaches screen_ticker (non-empty extracted frame) but
+    # blows up inside it must not abort the run: other tickers in the same
+    # batch should still be screened and returned normally.
+    closes = _rising_candidate_closes()
+    original_screen_ticker = etapa1.screen_ticker
+
+    def flaky_screen_ticker(ticker, df, **kwargs):
+        if ticker == "BAD":
+            raise ValueError("boom")
+        return original_screen_ticker(ticker, df, **kwargs)
+
+    monkeypatch.setattr(etapa1, "screen_ticker", flaky_screen_ticker)
+
+    def fake_downloader(chunk, period, interval):
+        frames = {t: _weekly_df(closes) for t in chunk}
+        return _multiindex_batch_result(frames)
+
+    result = run_etapa1_screen(
+        ["BAD", "GOOD1", "GOOD2"], batch_size=3, ma_window=10, downloader=fake_downloader
+    )
+
+    result_tickers = {c.ticker for c in result}
+    assert "BAD" not in result_tickers
+    assert {"GOOD1", "GOOD2"} <= result_tickers
 
 
 def test_run_etapa1_screen_excludes_non_candidates():
