@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from weinstein_screener.indicators import average_true_range, ma_slope, moving_average
+from weinstein_screener.indicators import average_true_range, ma_slope, moving_average, pct_distance_from_ma
 
 
 def _sample_df():
@@ -88,3 +88,22 @@ def test_average_true_range_rejects_invalid_method():
 
     with pytest.raises(ValueError, match="method"):
         average_true_range(df, method="bogus")
+
+
+def test_pct_distance_from_ma_computes_percentage_distance():
+    df = _sample_df()
+    ma = moving_average(df, window=3)
+    distance = pct_distance_from_ma(df["Close"], ma)
+
+    # At index 2: price=12, ma=11, distance = |12-11|/11*100 ≈ 9.09%
+    assert distance.iloc[2] == pytest.approx(100 / 11, rel=1e-2)
+    # At index 5: price=15, ma=14, distance = |15-14|/14*100 ≈ 7.14%
+    assert distance.iloc[5] == pytest.approx(100 / 14, rel=1e-2)
+
+
+def test_pct_distance_from_ma_is_zero_when_price_equals_ma():
+    prices = pd.Series([10.0, 20.0, 15.0])
+    mas = pd.Series([10.0, 20.0, 15.0])
+    distance = pct_distance_from_ma(prices, mas)
+
+    assert (distance == 0).all()

@@ -15,6 +15,10 @@ def ma_slope(ma: pd.Series, lookback: int) -> pd.Series:
     return ma - ma.shift(lookback)
 
 
+def pct_distance_from_ma(price: pd.Series, ma: pd.Series) -> pd.Series:
+    return (price - ma).abs() / ma * 100
+
+
 def average_true_range(df: pd.DataFrame, window: int = 14, method: str = "sma") -> pd.Series:
     """method: "sma" (media móvil simple, comportamiento original) o "wilder"
     (suavizado exponencial estilo Wilder/RMA, el que usan por defecto la
