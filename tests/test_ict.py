@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from weinstein_screener.ict import (
+    _is_low_volume_candle,
     find_buec,
     find_entry_1_signal,
     find_entry_3_signal,
@@ -257,3 +258,74 @@ def test_find_entry_3_signal_returns_none_without_a_buec():
     result = find_entry_3_signal(df, ar_high=120, breakout_index=0, atr=atr, window=5, tolerance=0.05)
 
     assert result is None
+
+
+def test_find_buec_triggers_via_low_volume_candle():
+    # 9 velas de relleno con volumen alto (para inflar la mediana de la ventana de
+    # lookback), seguidas de la ruptura con volumen bajo. La mediana de las 10
+    # velas previas al candidato (9 x 2,000,000 + 1 x 100,000) es 2,000,000.
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 2_000_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 100_000})  # ruptura, índice 9
+    rows.append(
+        # candidato, índice 10: alcista (no bajista) y de rango amplio (no estrecho),
+        # así que no cumple no_supply. Volumen (500,000) > volumen de ruptura (100,000),
+        # así que tampoco hay descenso de volumen en el segmento comparado.
+        # 500,000 <= 0.5 * 2,000,000 (mediana) -> low_volume.
+        {"Open": 119, "High": 121, "Low": 118, "Close": 120, "Volume": 500_000}
+    )
+    df = _daily_df(rows)
+
+    result = find_buec(df, ar_high=120, breakout_index=9, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.buec_index == 10
+    assert result.low_volume is True
+    assert result.no_supply is False
+    assert result.volume_declining is False
+
+
+def test_find_buec_does_not_trigger_low_volume_just_above_the_threshold():
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 2_000_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 100_000})  # ruptura, índice 9
+    rows.append(
+        # candidato, índice 10: mismo perfil que el test anterior, pero con
+        # volumen al 65% de la mediana (1,300,000), por encima del umbral del 50%.
+        {"Open": 119, "High": 121, "Low": 118, "Close": 120, "Volume": 1_300_000}
+    )
+    df = _daily_df(rows)
+
+    result = find_buec(df, ar_high=120, breakout_index=9, window=5, tolerance=0.05)
+
+    assert result is None
+
+
+def test_is_low_volume_candle_uses_median_not_mean():
+    # Escenario numérico del documento de diseño: un pico de 2,300,000 mezclado
+    # en la ventana de 10 velas previas. mediana=502,500, media=681,500.
+    # Con la vela de 230,000: 230,000 <= 0.5 * 502,500 (251,250) -> True.
+    prior_volumes = [500_000, 520_000, 480_000, 510_000, 495_000, 2_300_000, 505_000, 490_000, 515_000, 500_000]
+    rows = [{"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": v} for v in prior_volumes]
+    rows.append({"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 230_000})
+    df = _daily_df(rows)
+
+    assert _is_low_volume_candle(df, index=10) is True
+
+
+def test_find_entry_3_signal_is_high_confidence_when_buec_confirmed_only_by_low_volume():
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 2_000_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 100_000})  # ruptura, índice 9
+    rows.append(
+        # BUEC, índice 10: bajista (para que find_order_block lo identifique
+        # como su propio Order Block) pero de rango amplio y volumen bajo vs.
+        # las 2 velas previas altas, así que no cumple no_supply (rango no
+        # estrecho). Sí cumple low_volume: 500,000 <= 0.5 * 2,000,000 (mediana).
+        {"Open": 121, "High": 124, "Low": 117, "Close": 119, "Volume": 500_000}
+    )
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_3_signal(df, ar_high=120, breakout_index=9, atr=atr, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.trigger_index == 10
+    assert result.high_confidence is True

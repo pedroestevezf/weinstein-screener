@@ -114,6 +114,7 @@ class BuecResult:
     buec_index: int
     volume_declining: bool
     no_supply: bool
+    low_volume: bool
 
 
 def _is_no_supply_candle(df: pd.DataFrame, index: int, range_lookback: int = 10) -> bool:
@@ -138,6 +139,26 @@ def _is_no_supply_candle(df: pd.DataFrame, index: int, range_lookback: int = 10)
     return bool(is_bearish and small_range and upper_half_close and low_volume)
 
 
+def _is_low_volume_candle(df: pd.DataFrame, index: int, lookback: int = 10, fraction: float = 0.5) -> bool:
+    """True si el volumen de la vela `index` es <= `fraction` de la
+    **mediana** (no la media) del volumen de las `lookback` velas previas.
+
+    Se usa la mediana porque es robusta ante un pico de volumen dentro de
+    la ventana de lookback (por ejemplo, un SC/AR/Spring cercano) que
+    inflaría la media y haría que el criterio se disparase con más
+    facilidad de la que aparenta.
+    """
+    if index < lookback:
+        return False
+
+    prior_volumes = df["Volume"].iloc[index - lookback : index]
+    median_volume = prior_volumes.median()
+    if pd.isna(median_volume) or median_volume == 0:
+        return False
+
+    return bool(df["Volume"].iloc[index] <= fraction * median_volume)
+
+
 def find_buec(
     df: pd.DataFrame,
     ar_high: float,
@@ -146,6 +167,7 @@ def find_buec(
     tolerance: float = 0.05,
     volume_decline_fraction: float = 0.8,
     no_supply_lookback: int = 10,
+    low_volume_fraction: float = 0.5,
 ) -> BuecResult | None:
     """Primera vela, dentro de `window` días tras `breakout_index`, que toca
     la banda `±tolerance` alrededor de `ar_high` con volumen descendente o
@@ -180,9 +202,12 @@ def find_buec(
         volume_declining = (declines / (len(segment) - 1)) >= volume_decline_fraction
 
         no_supply = _is_no_supply_candle(df, i, no_supply_lookback)
+        low_volume = _is_low_volume_candle(df, i, no_supply_lookback, low_volume_fraction)
 
-        if volume_declining or no_supply:
-            return BuecResult(buec_index=i, volume_declining=volume_declining, no_supply=no_supply)
+        if volume_declining or no_supply or low_volume:
+            return BuecResult(
+                buec_index=i, volume_declining=volume_declining, no_supply=no_supply, low_volume=low_volume
+            )
 
     return None
 
@@ -259,17 +284,25 @@ def find_entry_3_signal(
     ob_lookback: int = 10,
     volume_decline_fraction: float = 0.8,
     no_supply_lookback: int = 10,
+    low_volume_fraction: float = 0.5,
     fvg_body_multiplier: float = 1.5,
     fvg_body_lookback: int = 20,
     fvg_gap_range_fraction: float = 0.2,
 ) -> EntrySignal | None:
     """Compone el disparador de la Entrada 3 (BUEC): BUEC (Back Up to Edge
-    of Creek) de `ar_high` con volumen descendente o vela no-supply, Order
-    Block, y FVG opcional como refuerzo. None si no hay BUEC o no hay Order
-    Block.
+    of Creek) de `ar_high` con volumen descendente, vela no-supply o
+    volumen muy bajo, Order Block, y FVG opcional como refuerzo. None si no
+    hay BUEC o no hay Order Block.
     """
     buec = find_buec(
-        df_daily, ar_high, breakout_index, window, tolerance, volume_decline_fraction, no_supply_lookback
+        df_daily,
+        ar_high,
+        breakout_index,
+        window,
+        tolerance,
+        volume_decline_fraction,
+        no_supply_lookback,
+        low_volume_fraction,
     )
     if buec is None:
         return None
@@ -300,5 +333,5 @@ def find_entry_3_signal(
         fvg_index=fvg_index,
         entry_price=entry_price,
         stop_loss=stop_loss,
-        high_confidence=buec.no_supply,
+        high_confidence=buec.no_supply or buec.low_volume,
     )
