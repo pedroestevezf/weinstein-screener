@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+import yfinance as yf
 
+from weinstein_screener.data import OHLCV_COLUMNS
 from weinstein_screener.indicators import moving_average, pct_distance_from_ma
 from weinstein_screener.regime import ma_rising
 
@@ -44,3 +46,89 @@ def screen_ticker(
         ma_rising=is_rising,
         is_candidate=distance_pct <= distance_pct_threshold and is_rising,
     )
+
+
+def _default_batch_downloader(tickers: list[str], period: str, interval: str) -> pd.DataFrame:
+    """Descarga OHLCV en bloque para varios tickers vía Yahoo Finance."""
+    return yf.download(
+        tickers,
+        period=period,
+        interval=interval,
+        progress=False,
+        auto_adjust=False,
+        group_by="ticker",
+        threads=True,
+    )
+
+
+def _extract_ticker_frame(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Extrae el DataFrame OHLCV de un ticker a partir del resultado de un lote.
+
+    Soporta ambas formas de salida de yfinance: columnas MultiIndex (lote con
+    varios tickers, nivel 0 = símbolo) y columnas planas (lote de un único
+    ticker). Devuelve un DataFrame vacío si el ticker no está presente.
+    """
+    if isinstance(raw.columns, pd.MultiIndex):
+        if ticker not in raw.columns.get_level_values(0):
+            return pd.DataFrame(columns=OHLCV_COLUMNS)
+        df = raw[ticker]
+    else:
+        df = raw
+
+    missing = [col for col in OHLCV_COLUMNS if col not in df.columns]
+    if missing:
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
+
+    return df[OHLCV_COLUMNS].dropna(how="all")
+
+
+def run_etapa1_screen(
+    tickers: list[str],
+    batch_size: int = 100,
+    distance_pct_threshold: float = 7.5,
+    ma_window: int = 30,
+    slope_lookback: int = 4,
+    period: str = "2y",
+    downloader=None,
+) -> list[Etapa1Candidate]:
+    """Ejecuta Etapa 1 sobre una lista de tickers, descargando OHLCV semanal
+    en lotes de `batch_size`. Tolerante a fallos individuales: un ticker sin
+    datos o que haga fallar `screen_ticker`, o un lote completo cuya descarga
+    falle, se omite sin abortar el resto de la corrida.
+
+    Devuelve solo los candidatos con `is_candidate = True`, ordenados por
+    `distance_pct` ascendente.
+    """
+    downloader = downloader or _default_batch_downloader
+
+    candidates: list[Etapa1Candidate] = []
+
+    for start in range(0, len(tickers), batch_size):
+        chunk = tickers[start : start + batch_size]
+
+        try:
+            raw = downloader(chunk, period, "1wk")
+        except Exception:
+            continue  # todo el lote falla: se omite, se sigue con el resto
+
+        for ticker in chunk:
+            try:
+                df = _extract_ticker_frame(raw, ticker)
+                if df.empty:
+                    continue
+                result = screen_ticker(
+                    ticker,
+                    df,
+                    distance_pct_threshold=distance_pct_threshold,
+                    ma_window=ma_window,
+                    slope_lookback=slope_lookback,
+                )
+            except Exception:
+                continue  # fallo de un ticker individual: se omite
+
+            if result is not None:
+                candidates.append(result)
+
+    qualified = [c for c in candidates if c.is_candidate is True]
+    qualified.sort(key=lambda c: c.distance_pct)
+    return qualified
