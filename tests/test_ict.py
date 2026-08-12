@@ -301,14 +301,29 @@ def test_find_buec_does_not_trigger_low_volume_just_above_the_threshold():
 
 def test_is_low_volume_candle_uses_median_not_mean():
     # Escenario numérico del documento de diseño: un pico de 2,300,000 mezclado
-    # en la ventana de 10 velas previas. mediana=502,500, media=681,500.
-    # Con la vela de 230,000: 230,000 <= 0.5 * 502,500 (251,250) -> True.
+    # en la ventana de 10 velas previas. mediana=502,500 (umbral=251,250),
+    # media=681,500 (umbral=340,750).
     prior_volumes = [500_000, 520_000, 480_000, 510_000, 495_000, 2_300_000, 505_000, 490_000, 515_000, 500_000]
-    rows = [{"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": v} for v in prior_volumes]
-    rows.append({"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 230_000})
-    df = _daily_df(rows)
 
-    assert _is_low_volume_candle(df, index=10) is True
+    # Caso positivo claro: 230,000 <= 251,250 (mediana) y también <= 340,750
+    # (media) -> True bajo cualquiera de las dos implementaciones. Sirve como
+    # verificación básica de que la función detecta bajo volumen.
+    rows_low = [{"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": v} for v in prior_volumes]
+    rows_low.append({"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 230_000})
+    df_low = _daily_df(rows_low)
+
+    assert _is_low_volume_candle(df_low, index=10) is True
+
+    # Caso discriminante: 300,000 está ESTRICTAMENTE ENTRE los dos umbrales.
+    # 300,000 <= 251,250 (mediana) -> False (comportamiento correcto).
+    # 300,000 <= 340,750 (media) -> True (lo que devolvería una implementación
+    # incorrecta basada en la media). Este caso es el que realmente distingue
+    # una implementación de mediana de una de media.
+    rows_mid = [{"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": v} for v in prior_volumes]
+    rows_mid.append({"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 300_000})
+    df_mid = _daily_df(rows_mid)
+
+    assert _is_low_volume_candle(df_mid, index=10) is False
 
 
 def test_find_entry_3_signal_is_high_confidence_when_buec_confirmed_only_by_low_volume():
