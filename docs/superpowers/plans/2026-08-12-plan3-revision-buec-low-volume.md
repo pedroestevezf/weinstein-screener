@@ -33,7 +33,7 @@ El usuario propuso un tercer criterio, más suelto que `no_supply`: una vela con
 
 `low_volume_fraction` con valor por defecto no cambia el comportamiento de ningún test existente que no lo pase explícitamente — solo añade casos nuevos que antes devolvían `None`. Los tests existentes de `test_ict.py` deben seguir pasando sin modificación salvo que alguno dependa implícitamente de que `find_buec` devuelva `None` en un caso donde ahora `low_volume` se cumple (a revisar por el implementador).
 
-## Tarea única
+### Task 1 — Tercer criterio de confirmación BUEC en `ict.py`
 
 Implementar los cambios de diseño anteriores en `weinstein_screener/ict.py`, con tests que cubran:
 - Vela con volumen muy bajo (≤50% de la mediana de las 10 previas) que toca la banda, sin ser rango estrecho ni bajista → antes `None`, ahora `BuecResult(low_volume=True, ...)`.
