@@ -159,6 +159,52 @@ def _is_low_volume_candle(df: pd.DataFrame, index: int, lookback: int = 10, frac
     return bool(df["Volume"].iloc[index] <= fraction * median_volume)
 
 
+def _is_high_confidence_buec_candle(
+    df: pd.DataFrame,
+    index: int,
+    volume_lookback: int = 4,
+    volume_fraction: float = 0.5,
+    range_lookback: int = 10,
+    close_position_min: float = 0.75,
+) -> bool:
+    """True si la vela `index` tiene la forma de mayor confianza de una
+    ausencia real de vendedores: bajista, de rango estrecho, con cierre en
+    el `close_position_min` superior de su rango, y volumen muy bajo
+    respecto a la mediana de las `volume_lookback` velas previas.
+
+    Más estricto que `_is_no_supply_candle` (cierre >= 75% en vez de >= 50%
+    del rango) porque este es el filtro para la etiqueta de MÁXIMA
+    confianza, no solo para la detección del BUEC. Usa mediana (no media)
+    en la comparación de volumen por la misma razón que
+    `_is_low_volume_candle`: es robusta ante un pico de volumen dentro de
+    la ventana corta reciente.
+    """
+    is_bearish = df["Close"].iloc[index] < df["Open"].iloc[index]
+
+    low = df["Low"].iloc[index]
+    high = df["High"].iloc[index]
+    candle_range = high - low
+
+    prior_ranges = (df["High"] - df["Low"]).iloc[max(0, index - range_lookback) : index]
+    avg_range = prior_ranges.mean()
+    small_range = not pd.isna(avg_range) and candle_range < avg_range
+
+    close_position = (df["Close"].iloc[index] - low) / candle_range if candle_range > 0 else 0
+    strong_close = close_position >= close_position_min
+
+    if index >= volume_lookback:
+        median_volume = df["Volume"].iloc[index - volume_lookback : index].median()
+        very_low_volume = (
+            not pd.isna(median_volume)
+            and median_volume > 0
+            and df["Volume"].iloc[index] <= volume_fraction * median_volume
+        )
+    else:
+        very_low_volume = False
+
+    return bool(is_bearish and small_range and strong_close and very_low_volume)
+
+
 def find_buec(
     df: pd.DataFrame,
     ar_high: float,
@@ -285,6 +331,10 @@ def find_entry_3_signal(
     volume_decline_fraction: float = 0.8,
     no_supply_lookback: int = 10,
     low_volume_fraction: float = 0.5,
+    high_confidence_volume_lookback: int = 4,
+    high_confidence_volume_fraction: float = 0.5,
+    high_confidence_range_lookback: int = 10,
+    high_confidence_close_position_min: float = 0.75,
     fvg_body_multiplier: float = 1.5,
     fvg_body_lookback: int = 20,
     fvg_gap_range_fraction: float = 0.2,
@@ -333,5 +383,13 @@ def find_entry_3_signal(
         fvg_index=fvg_index,
         entry_price=entry_price,
         stop_loss=stop_loss,
-        high_confidence=buec.no_supply or buec.low_volume,
+        high_confidence=buec.no_supply
+        or _is_high_confidence_buec_candle(
+            df_daily,
+            buec.buec_index,
+            high_confidence_volume_lookback,
+            high_confidence_volume_fraction,
+            high_confidence_range_lookback,
+            high_confidence_close_position_min,
+        ),
     )

@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from weinstein_screener.ict import (
+    _is_high_confidence_buec_candle,
     _is_low_volume_candle,
     find_buec,
     find_entry_1_signal,
@@ -326,14 +327,25 @@ def test_is_low_volume_candle_uses_median_not_mean():
     assert _is_low_volume_candle(df_mid, index=10) is False
 
 
-def test_find_entry_3_signal_is_high_confidence_when_buec_confirmed_only_by_low_volume():
+def test_find_entry_3_signal_rejects_high_confidence_for_a_distribution_shaped_low_volume_buec():
+    # Regresión: esta vela cumple low_volume (activa la detección del BUEC)
+    # pero tiene la FORMA de una vela de distribución — bajista, rango
+    # ANCHO (7 vs. ~2.3 de rango medio previo) y cierre cerca de su MÍNIMO
+    # (close_position ~28.6%) — justo lo contrario de "ausencia de
+    # vendedores". Con la lógica anterior (`no_supply or low_volume`) esto
+    # se marcaba erróneamente high_confidence=True; ahora debe ser False,
+    # porque _is_high_confidence_buec_candle exige rango estrecho y cierre
+    # en el 75% superior, y esta vela no cumple ninguna de las dos.
     rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 2_000_000} for _ in range(9)]
     rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 100_000})  # ruptura, índice 9
     rows.append(
         # BUEC, índice 10: bajista (para que find_order_block lo identifique
-        # como su propio Order Block) pero de rango amplio y volumen bajo vs.
-        # las 2 velas previas altas, así que no cumple no_supply (rango no
-        # estrecho). Sí cumple low_volume: 500,000 <= 0.5 * 2,000,000 (mediana).
+        # como su propio Order Block) pero de rango amplio (7, vs. ~2.3 de
+        # rango medio previo) y cierre cerca de su mínimo (close_position
+        # ~28.6%), así que no cumple no_supply (rango no estrecho) ni el
+        # nuevo criterio de high_confidence (rango no estrecho, cierre no en
+        # el 75% superior). Sí cumple low_volume: 500,000 <= 0.5 * 2,000,000
+        # (mediana), lo que basta para que se detecte el BUEC.
         {"Open": 121, "High": 124, "Low": 117, "Close": 119, "Volume": 500_000}
     )
     df = _daily_df(rows)
@@ -343,4 +355,146 @@ def test_find_entry_3_signal_is_high_confidence_when_buec_confirmed_only_by_low_
 
     assert result is not None
     assert result.trigger_index == 10
+    assert result.high_confidence is False
+
+
+def test_find_entry_3_signal_is_high_confidence_for_a_genuine_dry_up_shaped_buec():
+    # Vela BUEC que sí cumple la nueva forma exigida: bajista, rango
+    # estrecho vs. las 10 previas (rango 1.0 vs. media previa 2.3), cierre
+    # en el 90% de su rango (>= 75%), y volumen (200,000) <= 0.5 * mediana
+    # de las 4 velas previas (900,000 -> umbral 450,000).
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 900_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 800_000})  # ruptura, índice 9
+    rows.append(
+        # BUEC, índice 10: bajista (Close 119.9 < Open 120), rango estrecho
+        # (High-Low = 1.0), cierre en el 90% del rango
+        # ((119.9-119)/1.0 = 0.9).
+        {"Open": 120, "High": 120, "Low": 119, "Close": 119.9, "Volume": 200_000}
+    )
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_3_signal(df, ar_high=120, breakout_index=9, atr=atr, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.trigger_index == 10
     assert result.high_confidence is True
+
+
+def test_find_entry_3_signal_is_not_high_confidence_when_shape_matches_but_volume_is_not_low_enough():
+    # Misma forma de vela (bajista, rango estrecho, cierre en el 90% del
+    # rango) que el test anterior, pero con volumen (400,000) por encima
+    # del 50% de la mediana de las 4 velas previas (idx6-9: 900k, 800k,
+    # 400k, 400k -> mediana 600,000, umbral 300,000; 400,000 > 300,000
+    # -> no cumple el nuevo criterio de high_confidence).
+    #
+    # no_supply tampoco se dispara: su propio chequeo de volumen compara
+    # contra la MEDIA de las 2 velas previas (idx8-9: 400k, 400k -> media
+    # 400,000), y el candidato no tiene volumen estrictamente menor que
+    # esa media (400,000 < 400,000 es False) -> no_supply's low_volume
+    # sub-check falla, así que no_supply es False. Esto aísla lo que se
+    # está probando: la única razón por la que el BUEC se detecta es el
+    # low_volume "general" de detección (mediana de las 10 previas al 50%:
+    # mediana=900,000, umbral=450,000; 400,000 <= 450,000 -> True), no
+    # no_supply ni el nuevo criterio de high_confidence.
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 900_000} for _ in range(7)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 800_000})  # ruptura, índice 7
+    rows.append({"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 400_000})  # índice 8
+    rows.append({"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 400_000})  # índice 9
+    rows.append(
+        # BUEC, índice 10: bajista (Close 119.9 < Open 120), rango
+        # estrecho (High-Low=1.0 vs. media previa 2.3), cierre en el 90%
+        # del rango ((119.9-119)/1.0=0.9) -> cumple la forma exigida.
+        {"Open": 120, "High": 120, "Low": 119, "Close": 119.9, "Volume": 400_000}
+    )
+    df = _daily_df(rows)
+    atr = pd.Series([1.0] * len(df), index=df.index)
+
+    result = find_entry_3_signal(df, ar_high=120, breakout_index=7, atr=atr, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.trigger_index == 10
+    assert result.high_confidence is False
+
+
+def test_is_high_confidence_buec_candle_true_for_a_bearish_narrow_range_strong_close_dry_up():
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 900_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 800_000})  # índice 9
+    rows.append(
+        # índice 10: bajista, rango estrecho (1.0 vs. media previa 2.3),
+        # cierre en el 90% del rango, volumen (200,000) <= 0.5 * mediana de
+        # las 4 previas (900,000 -> umbral 450,000).
+        {"Open": 120, "High": 120, "Low": 119, "Close": 119.9, "Volume": 200_000}
+    )
+    df = _daily_df(rows)
+
+    assert _is_high_confidence_buec_candle(df, index=10) is True
+
+
+def test_is_high_confidence_buec_candle_false_when_close_position_is_below_the_threshold():
+    # Idéntica a la vela anterior salvo el cierre: 119.5 en vez de 119.9,
+    # así que close_position = 0.5 (< 0.75). El resto de sub-condiciones
+    # (bajista, rango estrecho, volumen bajo) se cumplen igual, aislando
+    # el chequeo de cierre.
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 900_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 800_000})  # índice 9
+    rows.append(
+        {"Open": 120, "High": 120, "Low": 119, "Close": 119.5, "Volume": 200_000}
+    )
+    df = _daily_df(rows)
+
+    assert _is_high_confidence_buec_candle(df, index=10) is False
+
+
+def test_is_high_confidence_buec_candle_false_when_the_candle_is_bullish_instead_of_bearish():
+    # Misma forma (rango estrecho, cierre en el 90% del rango, volumen
+    # bajo) que la vela de alta confianza, pero alcista (Close 119.9 >
+    # Open 119) en vez de bajista, aislando el chequeo de direccionalidad.
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 900_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 800_000})  # índice 9
+    rows.append(
+        {"Open": 119, "High": 120, "Low": 119, "Close": 119.9, "Volume": 200_000}
+    )
+    df = _daily_df(rows)
+
+    assert _is_high_confidence_buec_candle(df, index=10) is False
+
+
+def test_find_buec_returns_first_matching_candidate_even_when_a_later_one_would_satisfy_a_different_criterion():
+    # find_buec devuelve el PRIMER candidato (recorriendo velas en orden)
+    # que cumple CUALQUIERA de los tres criterios (volume_declining,
+    # no_supply, low_volume) — no el "mejor" candidato ni el que cumple
+    # más criterios. Este test fija ese comportamiento de precedencia
+    # explícitamente: la vela más temprana (índice 10) solo cumple
+    # low_volume; la vela posterior (índice 11), dentro de la misma
+    # ventana, cumpliría no_supply por sí sola si se llegara a evaluar.
+    # find_buec debe detenerse en la primera (índice 10) y NO seguir
+    # buscando la de no_supply.
+    rows = [{"Open": 110, "High": 111, "Low": 109, "Close": 110, "Volume": 2_000_000} for _ in range(9)]
+    rows.append({"Open": 118, "High": 122, "Low": 117, "Close": 121, "Volume": 100_000})  # ruptura, índice 9
+    rows.append(
+        # índice 10: candidato TEMPRANO. Alcista y de rango amplio (no
+        # cumple no_supply), pero volumen (500,000) <= 0.5 * mediana de
+        # las 10 previas (2,000,000 -> umbral 1,000,000) -> low_volume.
+        # Volumen (500,000) > volumen de ruptura (100,000), así que
+        # tampoco hay descenso de volumen en el segmento comparado.
+        {"Open": 119, "High": 121, "Low": 118, "Close": 120, "Volume": 500_000}
+    )
+    rows.append(
+        # índice 11: candidato POSTERIOR que, evaluado en solitario,
+        # cumpliría no_supply (bajista, rango estrecho de 1.5 vs. la media
+        # previa de 2.4, cierre en el 80% del rango, volumen 50,000 por
+        # debajo de la media de las 2 previas [100,000 y 500,000] = 300,000)
+        # pero que find_buec nunca debería llegar a evaluar porque el
+        # índice 10 ya disparó el criterio de low_volume primero.
+        {"Open": 119.4, "High": 119.5, "Low": 118, "Close": 119.2, "Volume": 50_000}
+    )
+    df = _daily_df(rows)
+
+    result = find_buec(df, ar_high=120, breakout_index=9, window=5, tolerance=0.05)
+
+    assert result is not None
+    assert result.buec_index == 10
+    assert result.low_volume is True
+    assert result.no_supply is False
+    assert result.volume_declining is False
