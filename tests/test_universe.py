@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from weinstein_screener.universe import (
     SymbolRecord,
     filter_common_stock,
@@ -262,10 +264,18 @@ def _fake_downloader(calls: list):
     return _download
 
 
+# Las fixtures de test solo tienen un puñado de tickers, muy por debajo del
+# umbral real de plausibilidad (MIN_PLAUSIBLE_UNIVERSE_SIZE=1000, ver FIX 4).
+# Estos tests ejercitan parseo/caché, no la guarda de tamaño, así que pasan
+# min_universe_size=1 explícitamente para no dispararla.
+
+
 def test_get_us_universe_downloads_parses_filters_dedupes_and_sorts(tmp_path: Path):
     calls: list = []
 
-    tickers = get_us_universe(cache_dir=tmp_path, downloader=_fake_downloader(calls))
+    tickers = get_us_universe(
+        cache_dir=tmp_path, downloader=_fake_downloader(calls), min_universe_size=1
+    )
 
     assert len(calls) == 2
     assert tickers == ["A", "AAPL"]
@@ -276,8 +286,8 @@ def test_get_us_universe_uses_fresh_cache_without_downloading(tmp_path: Path):
     calls: list = []
     downloader = _fake_downloader(calls)
 
-    get_us_universe(cache_dir=tmp_path, downloader=downloader)
-    tickers = get_us_universe(cache_dir=tmp_path, downloader=downloader)
+    get_us_universe(cache_dir=tmp_path, downloader=downloader, min_universe_size=1)
+    tickers = get_us_universe(cache_dir=tmp_path, downloader=downloader, min_universe_size=1)
 
     assert len(calls) == 2  # solo la primera llamada descarga
     assert tickers == ["A", "AAPL"]
@@ -287,13 +297,13 @@ def test_get_us_universe_redownloads_when_cache_is_stale(tmp_path: Path):
     calls: list = []
     downloader = _fake_downloader(calls)
 
-    get_us_universe(cache_dir=tmp_path, max_age_days=1, downloader=downloader)
+    get_us_universe(cache_dir=tmp_path, max_age_days=1, downloader=downloader, min_universe_size=1)
 
     cache_path = tmp_path / "us_universe.txt"
     old_time = cache_path.stat().st_mtime - (2 * 86400)
     os.utime(cache_path, (old_time, old_time))
 
-    get_us_universe(cache_dir=tmp_path, max_age_days=1, downloader=downloader)
+    get_us_universe(cache_dir=tmp_path, max_age_days=1, downloader=downloader, min_universe_size=1)
 
     assert len(calls) == 4
 
@@ -315,6 +325,46 @@ def test_get_us_universe_dedupes_symbols_present_in_both_files(tmp_path: Path):
     def downloader(url: str) -> str:
         return nasdaq_text if "nasdaqlisted" in url else other_text
 
-    tickers = get_us_universe(cache_dir=tmp_path, downloader=downloader)
+    tickers = get_us_universe(cache_dir=tmp_path, downloader=downloader, min_universe_size=1)
 
     assert tickers == ["AAPL"]
+
+
+# ---------------------------------------------------------------------------
+# FIX 4 — guarda de tamaño mínimo plausible del universo
+# ---------------------------------------------------------------------------
+
+
+def test_get_us_universe_raises_and_does_not_cache_when_universe_implausibly_small(
+    tmp_path: Path,
+):
+    calls: list = []
+    downloader = _fake_downloader(calls)  # fixtures solo tienen 2 tickers en total
+
+    with pytest.raises(RuntimeError):
+        get_us_universe(cache_dir=tmp_path, downloader=downloader)  # default min_universe_size=1000
+
+    assert not (tmp_path / "us_universe.txt").exists()
+
+
+def test_get_us_universe_does_not_overwrite_existing_good_cache_on_implausible_redownload(
+    tmp_path: Path,
+):
+    calls: list = []
+    downloader = _fake_downloader(calls)
+
+    # Primera descarga "buena" (con la guarda desactivada) deja una caché poblada.
+    get_us_universe(cache_dir=tmp_path, downloader=downloader, min_universe_size=1)
+    cache_path = tmp_path / "us_universe.txt"
+    good_contents = cache_path.read_text()
+
+    # La forzamos a quedar obsoleta para provocar una redescarga.
+    old_time = cache_path.stat().st_mtime - (30 * 86400)
+    os.utime(cache_path, (old_time, old_time))
+
+    # Redescarga con la guarda de tamaño en su umbral real por defecto: las
+    # fixtures (2 tickers) la disparan -> no debe pisar la caché buena existente.
+    with pytest.raises(RuntimeError):
+        get_us_universe(cache_dir=tmp_path, downloader=downloader)
+
+    assert cache_path.read_text() == good_contents

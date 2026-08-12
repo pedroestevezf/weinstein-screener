@@ -141,16 +141,32 @@ def _default_downloader(url: str) -> str:
         return response.read().decode()
 
 
+# Un universo real de acciones comunes NYSE+Nasdaq siempre tiene varios miles
+# de tickers. Un número muy por debajo de eso casi seguro indica un fallo de
+# la fuente de datos (página de error, formato cambiado, descarga truncada,
+# etc.), no un universo real reducido. 1000 deja margen de sobra.
+MIN_PLAUSIBLE_UNIVERSE_SIZE = 1000
+
+
 def get_us_universe(
     cache_dir: Path,
     max_age_days: int = 7,
     downloader=None,
+    min_universe_size: int = MIN_PLAUSIBLE_UNIVERSE_SIZE,
 ) -> list[str]:
     """Devuelve la lista ordenada de tickers US (NYSE + Nasdaq) de acciones comunes.
 
     Cachea la lista ya combinada/filtrada/deduplicada como texto plano (una línea
     por ticker) porque el universo cambia poco: no hace falta re-descargar en cada
     ejecución. `downloader` es inyectable para tests, igual que `fetch_ohlcv`.
+
+    Si una descarga fresca produce una lista con menos de `min_universe_size`
+    tickers, se considera un fallo de la fuente de datos: se lanza
+    `RuntimeError` y NO se escribe/actualiza la caché (para no pisar una
+    caché buena existente con un resultado vacío/sospechoso). Esta guarda
+    solo aplica al camino de descarga fresca — un valor ya cacheado sigue
+    siendo válido y se sirve normalmente aunque una descarga posterior
+    fallaría esta comprobación.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / "us_universe.txt"
@@ -169,6 +185,12 @@ def get_us_universe(
 
     records = parse_nasdaq_listed(nasdaq_text) + parse_other_listed(other_text)
     tickers = sorted(set(filter_common_stock(records)))
+
+    if len(tickers) < min_universe_size:
+        raise RuntimeError(
+            f"universo descargado sospechosamente pequeño ({len(tickers)} tickers) — "
+            "no se actualiza la caché, posible fallo de la fuente de datos"
+        )
 
     tmp_path = cache_path.with_suffix(".txt.tmp")
     tmp_path.write_text("\n".join(tickers))
