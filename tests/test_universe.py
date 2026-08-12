@@ -88,11 +88,33 @@ def test_filter_common_stock_excludes_plural_units():
     assert filter_common_stock(records) == []
 
 
+def test_filter_common_stock_excludes_plural_units_without_other_keywords():
+    # Aísla el caso anterior de la palabra "Acquisition" (que por sí sola ya
+    # excluiría el nombre vía `\bacquisition\b`). Verificado: el patrón viejo
+    # `\bunit\b` (sin el "s?") NO matchea "Units" aislado, así que este caso
+    # sí distingue el fix real del bug que describe el brief.
+    records = [SymbolRecord(symbol="EXUN", name="Example Corp - Units", test_issue=False, etf=False)]
+
+    assert filter_common_stock(records) == []
+
+
 def test_filter_common_stock_excludes_singular_warrant():
     records = [
         SymbolRecord(
             symbol="ARMAW", name="Armada Acquisition Corp. III - Warrant", test_issue=False, etf=False
         )
+    ]
+
+    assert filter_common_stock(records) == []
+
+
+def test_filter_common_stock_excludes_warrants_without_other_keywords():
+    # Un "Warrant" singular ya matchea el patrón viejo `\bwarrant\b` (sin "s?"),
+    # así que aislarlo de "Acquisition" no distinguiría el bug. Usamos la forma
+    # plural "Warrants", que es donde `\bwarrant\b` (sin "s?") realmente falla
+    # por el mismo motivo que "Units"/"Rights": la "s" rompe el boundary final.
+    records = [
+        SymbolRecord(symbol="EXWA", name="Example Corp - Warrants", test_issue=False, etf=False)
     ]
 
     assert filter_common_stock(records) == []
@@ -104,6 +126,15 @@ def test_filter_common_stock_excludes_plural_rights():
             symbol="ABONR", name="Abony Acquisition Corp. I - Rights", test_issue=False, etf=False
         )
     ]
+
+    assert filter_common_stock(records) == []
+
+
+def test_filter_common_stock_excludes_plural_rights_without_other_keywords():
+    # Igual que con "Units": aísla el término de "Acquisition" para probar que
+    # el fix real (no el bug del brief) es lo que excluye este nombre. Verificado:
+    # el patrón viejo `\bright\b` (sin "s?") NO matchea "Rights" aislado.
+    records = [SymbolRecord(symbol="EXRI", name="Example Corp - Rights", test_issue=False, etf=False)]
 
     assert filter_common_stock(records) == []
 

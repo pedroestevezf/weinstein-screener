@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 import urllib.request
@@ -115,7 +116,10 @@ def get_us_universe(
     if cache_path.exists():
         age_seconds = time.time() - cache_path.stat().st_mtime
         if age_seconds <= max_age_days * 86400:
-            return cache_path.read_text().splitlines()
+            try:
+                return cache_path.read_text().splitlines()
+            except Exception:
+                pass  # caché corrupto: se re-descarga más abajo
 
     download = downloader or _default_downloader
     nasdaq_text = download(NASDAQ_LISTED_URL)
@@ -124,5 +128,7 @@ def get_us_universe(
     records = parse_nasdaq_listed(nasdaq_text) + parse_other_listed(other_text)
     tickers = sorted(set(filter_common_stock(records)))
 
-    cache_path.write_text("\n".join(tickers))
+    tmp_path = cache_path.with_suffix(".txt.tmp")
+    tmp_path.write_text("\n".join(tickers))
+    os.replace(tmp_path, cache_path)
     return tickers
