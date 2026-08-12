@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> ⚠️ **Terminología superada — este documento es un registro histórico de ejecución, no la API actual.** `find_distribution` y el campo `distribution_index` de `WyckoffStructure`, tal como aparecen en el código de este plan, fueron renombrados a **`find_jac`** y **`jac_index`** en la revisión posterior "Plan 4 de 6 — revisión JAC/BUEC" (`2026-08-10-plan4-revision-jac-buec-range-target.md`). El motivo: "Distribution" en Wyckoff clásico designa una estructura de techo bajista — lo opuesto a lo que esta función detecta (una ruptura alcista con volumen, Fase D) — mientras que JAC (Jump Across the Creek) es el término correcto para ese evento. **No copiar el código de este documento tal cual** — usar los nombres actuales de `weinstein_screener/wyckoff.py`.
+
 **Goal:** Detectar, sobre datos semanales, una estructura de Acumulación/Reacumulación de Wyckoff (Selling Climax → Automatic Rally → Secondary Test → Fase B → Spring/Distribution), unificada con el modelo CRT tal como define la sección 4-5 del documento de diseño.
 
 **Architecture:** Un único módulo `weinstein_screener/wyckoff.py` con funciones puras encadenadas (cada fase del patrón es una función independiente y testeable), más una función orquestadora `detect_wyckoff_structure` que las compone y devuelve un resultado estructurado (`WyckoffStructure`, un dataclass). Todas las funciones trabajan sobre el mismo tipo de DataFrame semanal que produce `weinstein_screener.data` (columnas `Open/High/Low/Close/Volume`), usando posiciones enteras (`iloc`) para navegar semanas.
