@@ -7,6 +7,7 @@
 > 1. Donde este documento dice **"Distribution"** (sección 5, la ruptura alcista con volumen que confirma la Fase D) el nombre correcto en Wyckoff clásico es **JAC (Jump Across the Creek)** — "Distribution" designa una estructura de techo bajista, lo opuesto a lo que se describe aquí.
 > 2. Donde dice **"Entrada 3" / "retest"** (sección 6) el término correcto es **BUEC (Back Up to Edge of Creek)**.
 > 3. El **"techo PO3"** (sección 7) fue sustituido por un objetivo de toma de beneficios basado en la amplitud del propio rango de acumulación semanal (Cause→Effect) — se elimina la dependencia de datos de timeframe superior y la terminología ICT (PO3), que no debía mezclarse con la detección de estructura Wyckoff.
+> 4. **Cambio de arquitectura (2026-08-12)**: la Etapa 1 (sección 3) descrita abajo como "TradingView (plan gratuito) + Pine Screener" ya no es gratuita — TradingView movió el Pine Screener a un plan de pago. La Etapa 1 se reimplementó **en Python**, sobre el mismo pipeline de datos de la Etapa 2 (`fetch_ohlcv`/`indicators.py`), eliminando también el paso manual de exportación de CSV. **Cobertura reducida a NYSE+Nasdaq en v1** — Eurostoxx queda fuera hasta encontrar una fuente de universo equivalente. Ver `docs/superpowers/plans/2026-08-12-plan5-etapa1-python.md`.
 
 ## 1. Objetivo y alcance
 
