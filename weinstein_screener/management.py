@@ -123,3 +123,36 @@ def evaluate_exit_signal(
         partial_take_profit=bool(partial_take_profit),
         full_exit=not current_week_close_above_ma,
     )
+
+
+@dataclass
+class ExtendedMoveWarning:
+    progress_pct: float | None
+    is_extended: bool
+
+
+def evaluate_extended_move(
+    current_close: float,
+    entry_price: float,
+    range_target: float | None,
+    threshold: float = 0.5,
+) -> ExtendedMoveWarning:
+    """Progreso hacia el objetivo proyectado desde la entrada del JAC:
+    (precio_actual - precio_entrada) / (objetivo - precio_entrada).
+
+    `is_extended=True` cuando el progreso ya alcanza `threshold` (0.5 por
+    defecto -- a validar en backtest, igual que el resto de umbrales del
+    proyecto): el ratio riesgo/beneficio de una entrada nueva a partir de
+    ahí es pobre, así que se avisa en el detalle del ticker (no se filtra
+    en la lista de Etapa 1 -- eso exigiría la Etapa 2 completa para los
+    943 candidatos, justo lo que la arquitectura bajo demanda evita).
+
+    None/False si `range_target` es None (`project_range_target` lo
+    devuelve así con un rango inconsistente) o si el objetivo no queda
+    estrictamente por encima del precio de entrada.
+    """
+    if range_target is None or range_target <= entry_price:
+        return ExtendedMoveWarning(progress_pct=None, is_extended=False)
+
+    progress = (current_close - entry_price) / (range_target - entry_price)
+    return ExtendedMoveWarning(progress_pct=float(progress), is_extended=progress >= threshold)

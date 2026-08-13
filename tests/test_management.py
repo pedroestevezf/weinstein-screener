@@ -147,3 +147,55 @@ def test_old_terminology_does_not_reappear_in_the_package():
         capture_output=True, text=True, cwd=repo_root,
     )
     assert result.stdout == "", f"Terminología antigua reintroducida:\n{result.stdout}"
+
+
+from weinstein_screener.management import ExtendedMoveWarning, evaluate_extended_move
+
+
+def test_evaluate_extended_move_matches_the_worked_mockup_example():
+    result = evaluate_extended_move(current_close=231.0, entry_price=212.0, range_target=245.0)
+
+    assert result.progress_pct == pytest.approx(19 / 33)
+    assert result.is_extended is True
+
+
+def test_evaluate_extended_move_is_not_extended_below_threshold():
+    result = evaluate_extended_move(current_close=215.0, entry_price=212.0, range_target=245.0)
+
+    assert result.progress_pct == pytest.approx(3 / 33)
+    assert result.is_extended is False
+
+
+def test_evaluate_extended_move_boundary_at_exactly_the_threshold_is_extended():
+    # entry=200, target=300 -> progress exactly 0.5 at current_close=250
+    result = evaluate_extended_move(current_close=250.0, entry_price=200.0, range_target=300.0, threshold=0.5)
+
+    assert result.progress_pct == pytest.approx(0.5)
+    assert result.is_extended is True
+
+
+def test_evaluate_extended_move_handles_a_missing_range_target():
+    result = evaluate_extended_move(current_close=231.0, entry_price=212.0, range_target=None)
+
+    assert result.progress_pct is None
+    assert result.is_extended is False
+
+
+def test_evaluate_extended_move_guards_a_target_at_or_below_entry():
+    # defensive guard: a target that isn't strictly above entry can't yield
+    # a meaningful progress ratio (would divide by zero or go negative)
+    result = evaluate_extended_move(current_close=231.0, entry_price=212.0, range_target=212.0)
+
+    assert result.progress_pct is None
+    assert result.is_extended is False
+
+
+def test_evaluate_extended_move_composes_with_project_range_target_end_to_end():
+    # end-to-end with the real function this task must reuse, not reimplement
+    from weinstein_screener.management import project_range_target
+
+    target = project_range_target(entry_price=212.0, range_high=205.0, range_low=172.0)
+    result = evaluate_extended_move(current_close=231.0, entry_price=212.0, range_target=target)
+
+    assert target == pytest.approx(245.0)
+    assert result.is_extended is True
