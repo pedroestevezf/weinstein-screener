@@ -1461,6 +1461,21 @@ git commit -m "feat: add the two-screen Streamlit dashboard"
 
 ---
 
+## Addendum (2026-08-13) — final whole-branch review findings
+
+The final review (most capable model, real-data verification) found 1 Critical + 5 Important findings, all traced to this plan's own code, not implementer transcription error:
+
+1. **(Critical) Entry 3's BUEC search window is anchored to the FIRST daily bar of the JAC week, not the last.** `daily_breakout_index = int(df_daily.index.searchsorted(jac_week_date))` lands on the JAC week's Monday — but the JAC is confirmed at that week's CLOSE, so `find_buec` ends up scanning days *during* the breakout (when price is naturally sitting near `ar_high`) instead of after it, producing a spurious Entry 3 entry price/stop. **Fix**: anchor to the last daily bar on/before `jac_week_date + 6 days` instead: `int(df_daily.index.searchsorted(jac_week_date + pd.Timedelta(days=7))) - 1`, clamped to `[0, len(df_daily)-1]`.
+2. **(Important) The dashboard never drops the unclosed current week before evaluating Wyckoff/exit logic**, unlike `etapa1.py::_drop_unclosed_current_week`, which exists specifically to avoid this (verified: `weinstein_stage2_active`/`close_above_ma`/`detect_wyckoff_structure` all ran on a real in-progress weekly bar in live testing). **Fix**: export the helper (drop the leading underscore) from `etapa1.py`, call it once in `dashboard_app.py::load_weekly` to produce a `df_weekly_closed` used for ALL signal computations, keeping the raw (unclosed-week-included) `df_weekly` only for the live price display line.
+3. **(Important) `relative_volume` in `enrich_shortlist.py` is fed the same unclosed week**, measurably deflating the ratio (~8% low on a Thursday in real testing, worse earlier in the week). **Fix**: same shared helper, applied before calling `relative_volume`.
+4. **(Important) The back button leaves stale selection state, so re-selecting the SAME ticker after going back does nothing** (the equality guard from the Critical-loop fix sees no change). **Fix**: on the back-button handler, also clear the dataframe widget's own state (`st.session_state.pop("shortlist_table", None)`) in addition to `selected_ticker`/`screen` — NOT just clearing `selected_ticker` alone, which would reintroduce the infinite-rerun loop.
+5. **(Important) Markers older than the visible 32-week window silently stretch the whole chart** (reproduced with a real SC 50 weeks back). **Fix**: filter `marker_dates` to only those falling within `df_visible`'s actual date range inside `build_chart_data`, before constructing `ChartMarker`s — simplest correct fix, no `rendering.py` change needed (the x-domain is inferred from what's actually plotted).
+6. **(Important) The `entry1_stopped_out=False` code comment is wrong for the one alert path the UI actually shows** — it claims the hardcode only under-reports (safe direction), but the breakeven `st.info(...)` alert the user sees can over-report (fire when Entry 1 was actually stopped out). **Fix**: correct the comment, add a short caveat in the alert text itself.
+
+Also fixed in the same wave (originally Minor, but safety-relevant and cheap): the master "salida total" exit alert was gated behind `if target is not None`, hiding the most important risk alert whenever `project_range_target` returns `None` — restructured so `evaluate_exit_signal`'s `full_exit` is always evaluated when Entry 2 exists, independent of whether a target could be computed.
+
+Remaining Minor findings (screener table presentation polish — `—` for missing values, guaranteed last-sort, `relative_volume≥1.5` highlight pill, Spanish column headers; chart range-band shape not pinned to the SC→JAC x-span with dotted boundary lines; a few unused test imports; no progress output during `enrich_shortlist.py`'s ~10-minute run) are parked, not fixed in this branch — see the ledger for the explicit ruling on each.
+
 ## Task 8: Final whole-branch review + finish branch
 
 - [ ] **Step 1: Run the full suite one more time**
