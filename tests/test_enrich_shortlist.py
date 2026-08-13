@@ -4,7 +4,7 @@ import io
 import pandas as pd
 import pytest
 
-from scripts.enrich_shortlist import build_enriched_rows, read_shortlist_csv
+from scripts.enrich_shortlist import build_enriched_rows, fundamentals_failure_rate, read_shortlist_csv
 
 
 def test_read_shortlist_csv_parses_ticker_distance_and_ma_rising():
@@ -43,6 +43,24 @@ def test_build_enriched_rows_merges_fundamentals_and_relative_volume():
             "relative_volume": 1.9,
         }
     ]
+
+
+def test_fundamentals_failure_rate_is_zero_with_no_rows():
+    assert fundamentals_failure_rate([]) == 0.0
+
+
+def test_fundamentals_failure_rate_counts_only_rows_with_all_four_fields_none():
+    rows = [
+        {"sector": "Industrials", "market_cap": 1.0, "trailing_pe": 2.0, "ev_to_fcf": 3.0},
+        {"sector": None, "market_cap": None, "trailing_pe": None, "ev_to_fcf": None},
+        # only ev_to_fcf missing -- a normal partial-coverage case, not a total failure
+        {"sector": "Industrials", "market_cap": 1.0, "trailing_pe": 2.0, "ev_to_fcf": None},
+        {"sector": None, "market_cap": None, "trailing_pe": None, "ev_to_fcf": None},
+    ]
+
+    result = fundamentals_failure_rate(rows)
+
+    assert result == pytest.approx(0.5)  # 2 of 4 rows have all four fields None
 
 
 def test_build_enriched_rows_fills_missing_ticker_data_with_none():

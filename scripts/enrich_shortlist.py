@@ -35,6 +35,14 @@ ENRICHED_FIELDS = [
     "relative_volume",
 ]
 
+# Umbral para distinguir "unos pocos tickers oscuros sin cobertura completa"
+# (normal) de "algo sistémico rompió la obtención de fundamentales" (p. ej.
+# rate-limiting de Yahoo tras la descarga masiva de run_etapa1.py, que se
+# ejecuta justo antes en el mismo job semanal -- observado realmente: una
+# corrida completa de 943 tickers devolvió 0/943 con datos, mientras que
+# lotes pequeños ejecutados minutos después funcionaban con normalidad).
+MAX_FUNDAMENTALS_FAILURE_RATE = 0.5
+
 
 def read_shortlist_csv(file_obj) -> list[dict]:
     reader = csv.DictReader(file_obj)
@@ -74,6 +82,26 @@ def build_enriched_rows(
     return rows
 
 
+def fundamentals_failure_rate(enriched_rows: list[dict]) -> float:
+    """Fracción de filas sin NINGÚN campo de fundamentales (sector, cap.
+    mercado, PER, EV/FCF todos None) -- una sola de esas columnas vacía es
+    normal en tickers pequeños con cobertura parcial, pero las CUATRO a la
+    vez en muchos tickers es la firma de un fallo sistémico de la fuente de
+    datos, no de datos genuinamente ausentes.
+    """
+    if not enriched_rows:
+        return 0.0
+    failures = sum(
+        1
+        for row in enriched_rows
+        if row["sector"] is None
+        and row["market_cap"] is None
+        and row["trailing_pe"] is None
+        and row["ev_to_fcf"] is None
+    )
+    return failures / len(enriched_rows)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Enriquece la shortlist de Etapa 1 con fundamentales y volumen relativo.")
     parser.add_argument("--input", default="data_cache/etapa1_shortlist.csv")
@@ -103,6 +131,18 @@ def main(argv: list[str] | None = None) -> None:
 
     enriched_rows = build_enriched_rows(shortlist_rows, fundamentals_by_ticker, relative_volume_by_ticker)
 
+    failure_rate = fundamentals_failure_rate(enriched_rows)
+    if failure_rate > MAX_FUNDAMENTALS_FAILURE_RATE:
+        print(
+            f"AVISO: no se escribe {args.output} -- {failure_rate:.0%} de los tickers no trajeron "
+            "ningún campo de fundamentales (umbral: "
+            f"{MAX_FUNDAMENTALS_FAILURE_RATE:.0%}), indicio de un fallo sistémico de la fuente de "
+            "datos (p. ej. rate-limiting tras run_etapa1.py) en vez de datos genuinamente ausentes. "
+            "Se conserva el CSV enriquecido existente si lo hay.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="") as f:
@@ -110,7 +150,7 @@ def main(argv: list[str] | None = None) -> None:
         writer.writeheader()
         writer.writerows(enriched_rows)
 
-    print(f"{len(enriched_rows)} tickers enriquecidos -> {output_path}")
+    print(f"{len(enriched_rows)} tickers enriquecidos -> {output_path} (fallo de fundamentales: {failure_rate:.0%})")
 
 
 if __name__ == "__main__":
