@@ -48,6 +48,13 @@ def render_price_chart(chart_data: ChartData) -> alt.VConcatChart:
         .mark_rect(opacity=0.12, color="#1c7c72")
         .encode(y=alt.Y("low:Q", axis=alt.Axis(orient="right", title="Precio"), scale=price_scale), y2="high:Q")
     )
+    # Líneas de referencia punteadas en AMBOS niveles del rango (spec, sección
+    # 4.1) -- el rectángulo sombreado por sí solo no delimita visualmente
+    # dónde caen exactamente el soporte (SC) y la resistencia (AR).
+    range_lines_df = pd.DataFrame({"level": [chart_data.range_low, chart_data.range_high]})
+    range_lines = alt.Chart(range_lines_df).mark_rule(strokeDash=[2, 2], color="#1c7c72").encode(
+        y=alt.Y("level:Q", axis=alt.Axis(orient="right"), scale=price_scale)
+    )
     wicks = alt.Chart(df).mark_rule().encode(
         x="Date:T", y=alt.Y("Low:Q", axis=alt.Axis(orient="right"), scale=price_scale), y2="High:Q",
         color=alt.Color("Direction:N", scale=color_scale, legend=None),
@@ -63,7 +70,7 @@ def render_price_chart(chart_data: ChartData) -> alt.VConcatChart:
         x="Date:T", y=alt.Y("MA:Q", axis=alt.Axis(orient="right"), scale=price_scale)
     )
 
-    price_layers = [range_band, wicks, bodies, ma_line]
+    price_layers = [range_band, range_lines, wicks, bodies, ma_line]
 
     if chart_data.markers:
         markers_df = pd.DataFrame(
