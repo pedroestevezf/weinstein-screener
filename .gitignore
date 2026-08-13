@@ -2,5 +2,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-data_cache/
+data_cache/*
+!data_cache/etapa1_shortlist.csv
+!data_cache/etapa1_shortlist_enriched.csv
 .superpowers/

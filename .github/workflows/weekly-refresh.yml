@@ -1,0 +1,37 @@
+name: Actualización semanal de la shortlist
+
+on:
+  schedule:
+    # Lunes 06:00 UTC -- después del cierre semanal del viernes en mercados US
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar Etapa 1 (universo -> shortlist)
+        run: python scripts/run_etapa1.py
+
+      - name: Enriquecer la shortlist (fundamentales + volumen relativo)
+        run: python scripts/enrich_shortlist.py
+
+      - name: Commit y push si hay cambios
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data_cache/etapa1_shortlist.csv data_cache/etapa1_shortlist_enriched.csv
+          git diff --staged --quiet || git commit -m "chore: actualización semanal de la shortlist"
+          git push
