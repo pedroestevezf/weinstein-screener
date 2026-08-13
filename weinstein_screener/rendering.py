@@ -43,23 +43,36 @@ def render_price_chart(chart_data: ChartData) -> alt.VConcatChart:
     # mínima de un eje 0-35 y apenas se distinguen las velas.
     price_scale = alt.Scale(zero=False)
 
-    range_band = (
-        alt.Chart(pd.DataFrame({"low": [chart_data.range_low], "high": [chart_data.range_high]}))
-        .mark_rect(opacity=0.12, color="#1c7c72")
-        .encode(y=alt.Y("low:Q", axis=alt.Axis(orient="right", title="Precio"), scale=price_scale), y2="high:Q")
-    )
-    # Líneas de referencia en los dos niveles del rango -- el rectángulo
-    # sombreado por sí solo no delimita visualmente dónde caen exactamente
-    # el soporte (SC) y la resistencia (AR). Empiezan en la vela del SC (no
-    # antes -- el rango no existe todavía) y van SÓLIDAS hasta el JAC (o
-    # hasta la última vela visible si el JAC todavía no ha ocurrido). A
-    # partir del JAC solo el nivel superior continúa, como línea de puntos
-    # -- el soporte del SC deja de ser relevante tras la ruptura, pero la
-    # resistencia del AR sigue sirviendo de referencia (p. ej. como soporte
-    # en el retroceso hacia el BUEC).
-    range_lines = []
+    # El sombreado y las líneas de referencia del rango de acumulación --
+    # ambos acotados al mismo tramo temporal, no al ancho completo del
+    # gráfico: el rango no existe antes de la vela del SC, y va SÓLIDO
+    # hasta el JAC (o hasta la última vela visible si el JAC todavía no ha
+    # ocurrido). A partir del JAC solo el nivel superior continúa, como
+    # línea de puntos -- el soporte del SC deja de ser relevante tras la
+    # ruptura, pero la resistencia del AR sigue sirviendo de referencia
+    # (p. ej. como soporte en el retroceso hacia el BUEC).
+    range_layers = []
     if chart_data.sc_date is not None:
         solid_end = chart_data.jac_date if chart_data.jac_date is not None else chart_data.df_visible.index.max()
+
+        # `axis=alt.Axis(title=None)` en "start" -- sin esto, Vega-Lite
+        # concatena los nombres de campo de todas las capas del eje X
+        # compartido en un único título ("start, end, Date" en vez de
+        # "Date"), ya que estas capas usan "start"/"end" en vez de "Date".
+        band_df = pd.DataFrame(
+            {"start": [chart_data.sc_date], "end": [solid_end], "low": [chart_data.range_low], "high": [chart_data.range_high]}
+        )
+        range_layers.append(
+            alt.Chart(band_df)
+            .mark_rect(opacity=0.12, color="#1c7c72")
+            .encode(
+                x=alt.X("start:T", axis=alt.Axis(title=None)),
+                x2="end:T",
+                y=alt.Y("low:Q", axis=alt.Axis(orient="right"), scale=price_scale),
+                y2="high:Q",
+            )
+        )
+
         solid_df = pd.DataFrame(
             {
                 "start": [chart_data.sc_date, chart_data.sc_date],
@@ -67,11 +80,7 @@ def render_price_chart(chart_data: ChartData) -> alt.VConcatChart:
                 "level": [chart_data.range_low, chart_data.range_high],
             }
         )
-        # `axis=alt.Axis(title=None)` en "start" -- sin esto, Vega-Lite
-        # concatena los nombres de campo de todas las capas del eje X
-        # compartido en un único título ("start, end, Date" en vez de
-        # "Date"), ya que estas capas usan "start"/"end" en vez de "Date".
-        range_lines.append(
+        range_layers.append(
             alt.Chart(solid_df)
             .mark_rule(color="#1c7c72")
             .encode(
@@ -84,7 +93,7 @@ def render_price_chart(chart_data: ChartData) -> alt.VConcatChart:
             dotted_df = pd.DataFrame(
                 {"start": [chart_data.jac_date], "end": [chart_data.df_visible.index.max()], "level": [chart_data.range_high]}
             )
-            range_lines.append(
+            range_layers.append(
                 alt.Chart(dotted_df)
                 .mark_rule(strokeDash=[2, 2], color="#1c7c72")
                 .encode(
@@ -93,8 +102,11 @@ def render_price_chart(chart_data: ChartData) -> alt.VConcatChart:
                     y=alt.Y("level:Q", axis=alt.Axis(orient="right"), scale=price_scale),
                 )
             )
+    # `title="Precio"` va en wicks (no en el rango) porque wicks siempre se
+    # dibuja -- si el título dependiera de una capa de rango condicional,
+    # desaparecería del eje cuando `chart_data.sc_date` es None.
     wicks = alt.Chart(df).mark_rule().encode(
-        x="Date:T", y=alt.Y("Low:Q", axis=alt.Axis(orient="right"), scale=price_scale), y2="High:Q",
+        x="Date:T", y=alt.Y("Low:Q", axis=alt.Axis(orient="right", title="Precio"), scale=price_scale), y2="High:Q",
         color=alt.Color("Direction:N", scale=color_scale, legend=None),
     )
     bodies = alt.Chart(df).mark_bar(size=6).encode(
@@ -108,7 +120,7 @@ def render_price_chart(chart_data: ChartData) -> alt.VConcatChart:
         x="Date:T", y=alt.Y("MA:Q", axis=alt.Axis(orient="right"), scale=price_scale)
     )
 
-    price_layers = [range_band, *range_lines, wicks, bodies, ma_line]
+    price_layers = [*range_layers, wicks, bodies, ma_line]
 
     if chart_data.markers:
         markers_df = pd.DataFrame(

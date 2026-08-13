@@ -202,9 +202,17 @@ def detect_wyckoff_structure(
 ) -> WyckoffStructure | None:
     """Detecta la estructura Wyckoff/CRT más reciente y vigente en `df_weekly`.
 
-    Devuelve None si no se encuentra SC, AR o ST, o si el ST encontrado ya
-    no está vigente (más antiguo que `phase_a_recency_weeks` respecto a
-    `as_of`).
+    Devuelve None si no se encuentra SC, AR o ST, si el ST encontrado ya no
+    está vigente (más antiguo que `phase_a_recency_weeks` respecto a
+    `as_of`), o si hay JAC sin Spring previo (ver más abajo).
+
+    Un JAC sin Spring invalida toda la estructura, no solo el JAC: el
+    Spring (barrida de stops bajo el soporte real, `range_low`) es lo que
+    confirma que la Fase C fue un test de demanda genuino antes de la
+    ruptura. Sin ese test, una ruptura de `range_high` no es de fiar como
+    JAC -- es indistinguible de un UTA (Upthrust, ruptura fallida propia de
+    distribución, no de acumulación), así que el activo entero deja de
+    considerarse un candidato de acumulación vigente.
     """
     as_of = len(df_weekly) - 1 if as_of is None else min(as_of, len(df_weekly) - 1)
 
@@ -240,6 +248,9 @@ def detect_wyckoff_structure(
         df_weekly, st_index, as_of, range_low, spring_close_tolerance, spring_close_position_min
     )
     jac_index = find_jac(df_weekly, st_index, as_of, range_high)
+
+    if jac_index is not None and spring_index is None:
+        return None
 
     return WyckoffStructure(
         sc_index=sc_index,

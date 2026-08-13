@@ -232,6 +232,23 @@ def test_detect_wyckoff_structure_finds_the_full_pattern():
     assert result.jac_index == 39
 
 
+def test_detect_wyckoff_structure_returns_none_when_jac_occurs_without_a_prior_spring():
+    # same scenario as the full pattern above, EXCEPT the week at index 35
+    # (Low=108, a genuine stop-hunt below range_low=112.5) is replaced with
+    # an ordinary week that never breaches range_low -- no Spring. The final
+    # breakout row is untouched, so find_jac alone would still flag index
+    # 39 -- detect_wyckoff_structure must invalidate the whole structure
+    # instead of returning it with spring_index=None, jac_index=39: a JAC
+    # with no prior test of demand is indistinguishable from a UTA.
+    rows = _wyckoff_scenario_rows()
+    rows[35] = {"Open": 119, "High": 121, "Low": 117, "Close": 120, "Volume": 550_000}
+    df = _weekly_df(rows)
+
+    result = detect_wyckoff_structure(df)
+
+    assert result is None
+
+
 def test_detect_wyckoff_structure_returns_none_without_a_climax():
     rows = [{"Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 500_000} for _ in range(40)]
     df = _weekly_df(rows)

@@ -92,9 +92,30 @@ def test_render_price_chart_omits_range_lines_when_sc_date_is_none():
     result = render_price_chart(chart_data)
     price_panel = result.vconcat[0]
 
-    # range_band, wicks, bodies, ma_line -- no SC date means no range line
-    # layers at all (the accumulation range doesn't exist before the SC).
-    assert len(price_panel.layer) == 4
+    # wicks, bodies, ma_line -- no SC date means no range band/line layers
+    # at all (the accumulation range doesn't exist before the SC).
+    assert len(price_panel.layer) == 3
+
+
+def test_render_price_chart_range_band_is_bounded_to_sc_through_the_solid_end():
+    # the shaded rectangle must span only the accumulation range's actual
+    # duration (SC..JAC, or SC..now without a JAC yet) -- not the entire
+    # visible window, which would shade candles that have nothing to do
+    # with the range (before the SC, or long after the JAC).
+    dates = pd.date_range("2024-01-01", periods=10, freq="W-MON")
+    chart_data = _sample_chart_data(sc_date=dates[2], jac_date=dates[6])
+
+    result = render_price_chart(chart_data)
+    price_panel_dict = result.vconcat[0].to_dict()
+    band_layer = price_panel_dict["layer"][0]
+    values = _layer_values(price_panel_dict, 0)
+
+    assert band_layer["mark"]["type"] == "rect"
+    assert len(values) == 1
+    assert values[0]["start"] == dates[2].isoformat()
+    assert values[0]["end"] == dates[6].isoformat()
+    assert values[0]["low"] == 95.0
+    assert values[0]["high"] == 115.0
 
 
 def test_render_price_chart_range_line_is_one_solid_segment_from_sc_to_now_without_a_jac():
