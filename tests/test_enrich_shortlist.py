@@ -28,8 +28,11 @@ def test_build_enriched_rows_merges_fundamentals_and_relative_volume():
         )
     }
     relative_volume_by_ticker = {"WM": 1.9}
+    wyckoff_active_by_ticker = {"WM": True}
 
-    result = build_enriched_rows(shortlist_rows, fundamentals_by_ticker, relative_volume_by_ticker)
+    result = build_enriched_rows(
+        shortlist_rows, fundamentals_by_ticker, relative_volume_by_ticker, wyckoff_active_by_ticker
+    )
 
     assert result == [
         {
@@ -41,6 +44,7 @@ def test_build_enriched_rows_merges_fundamentals_and_relative_volume():
             "trailing_pe": 59.9,
             "ev_to_fcf": 48.3,
             "relative_volume": 1.9,
+            "wyckoff_active": True,
         }
     ]
 
@@ -81,5 +85,6 @@ def test_build_enriched_rows_fills_missing_ticker_data_with_none():
             "trailing_pe": None,
             "ev_to_fcf": None,
             "relative_volume": None,
+            "wyckoff_active": None,
         }
     ]

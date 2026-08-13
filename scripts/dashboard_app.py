@@ -98,8 +98,9 @@ def render_screener_screen():
         )
         return
 
-    df = load_shortlist()
-    st.caption(f"{len(df)} candidatos de Etapa 1")
+    df_all = load_shortlist()
+    df = df_all[df_all["wyckoff_active"] == True]  # noqa: E712 -- pandas boolean-column filter, not an identity check
+    st.caption(f"{len(df)} candidatos con estructura Wyckoff vigente (de {len(df_all)} en Etapa 1)")
 
     event = st.dataframe(
         df,

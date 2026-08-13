@@ -1,5 +1,8 @@
 """Enriquece la shortlist de Etapa 1 con fundamentales (sector, cap.
-mercado, PER, EV/FCF) y volumen relativo semanal.
+mercado, PER, EV/FCF), volumen relativo semanal y si tiene una estructura
+Wyckoff (SC->AR->ST) vigente ahora mismo -- este último campo reutiliza el
+mismo df_weekly ya descargado para el volumen relativo, sin llamadas de red
+adicionales.
 
 Uso:
     .venv/bin/python scripts/enrich_shortlist.py [--input ...] [--output ...] [--cache-dir ...]
@@ -23,6 +26,7 @@ from weinstein_screener.data import get_cached_ohlcv
 from weinstein_screener.etapa1 import drop_unclosed_current_week
 from weinstein_screener.fundamentals import fetch_fundamentals_for_candidates
 from weinstein_screener.indicators import relative_volume
+from weinstein_screener.wyckoff import detect_wyckoff_structure
 
 ENRICHED_FIELDS = [
     "ticker",
@@ -33,6 +37,7 @@ ENRICHED_FIELDS = [
     "trailing_pe",
     "ev_to_fcf",
     "relative_volume",
+    "wyckoff_active",
 ]
 
 # Umbral para distinguir "unos pocos tickers oscuros sin cobertura completa"
@@ -62,7 +67,9 @@ def build_enriched_rows(
     shortlist_rows: list[dict],
     fundamentals_by_ticker: dict,
     relative_volume_by_ticker: dict,
+    wyckoff_active_by_ticker: dict | None = None,
 ) -> list[dict]:
+    wyckoff_active_by_ticker = wyckoff_active_by_ticker or {}
     rows = []
     for entry in shortlist_rows:
         ticker = entry["ticker"]
@@ -77,6 +84,7 @@ def build_enriched_rows(
                 "trailing_pe": fundamentals.trailing_pe if fundamentals else None,
                 "ev_to_fcf": fundamentals.ev_to_fcf if fundamentals else None,
                 "relative_volume": relative_volume_by_ticker.get(ticker),
+                "wyckoff_active": wyckoff_active_by_ticker.get(ticker),
             }
         )
     return rows
@@ -121,15 +129,20 @@ def main(argv: list[str] | None = None) -> None:
     fundamentals_by_ticker = {f.ticker: f for f in fundamentals_list}
 
     relative_volume_by_ticker = {}
+    wyckoff_active_by_ticker = {}
     for ticker in tickers:
         try:
             df_weekly = get_cached_ohlcv(ticker, interval="1wk", cache_dir=Path(args.cache_dir), period="2y")
             df_weekly = drop_unclosed_current_week(df_weekly)
             relative_volume_by_ticker[ticker] = relative_volume(df_weekly)
+            wyckoff_active_by_ticker[ticker] = detect_wyckoff_structure(df_weekly) is not None
         except Exception:
             relative_volume_by_ticker[ticker] = None
+            wyckoff_active_by_ticker[ticker] = None
 
-    enriched_rows = build_enriched_rows(shortlist_rows, fundamentals_by_ticker, relative_volume_by_ticker)
+    enriched_rows = build_enriched_rows(
+        shortlist_rows, fundamentals_by_ticker, relative_volume_by_ticker, wyckoff_active_by_ticker
+    )
 
     failure_rate = fundamentals_failure_rate(enriched_rows)
     if failure_rate > MAX_FUNDAMENTALS_FAILURE_RATE:
