@@ -18,7 +18,7 @@ class Etapa1Candidate:
     is_candidate: bool
 
 
-def _drop_unclosed_current_week(df_weekly: pd.DataFrame) -> pd.DataFrame:
+def drop_unclosed_current_week(df_weekly: pd.DataFrame) -> pd.DataFrame:
     """Descarta la última fila de `df_weekly` si corresponde a una semana que
     todavía no ha cerrado del todo.
 
@@ -54,7 +54,7 @@ def screen_ticker(
     histórico suficiente para calcular la MA (`len(df_weekly) < ma_window`)
     una vez descartada la semana en curso todavía no cerrada.
     """
-    df_weekly = _drop_unclosed_current_week(df_weekly)
+    df_weekly = drop_unclosed_current_week(df_weekly)
 
     if len(df_weekly) < ma_window:
         return None

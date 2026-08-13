@@ -60,8 +60,12 @@ def build_chart_data(
     ma_visible = ma_full.reindex(df_visible.index)
 
     markers: list[ChartMarker] = []
+    visible_start = df_visible.index.min()
+    visible_end = df_visible.index.max()
     for label, date in marker_dates.items():
         if date is None or date not in df_weekly_full.index:
+            continue
+        if date < visible_start or date > visible_end:
             continue
         field = _MARKER_PRICE_FIELD[label]
         price = float(df_weekly_full.loc[date, field])

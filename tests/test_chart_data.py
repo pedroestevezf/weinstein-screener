@@ -114,6 +114,23 @@ def test_build_chart_data_excludes_a_marker_date_outside_the_dataframe():
     assert result.markers == []
 
 
+def test_build_chart_data_excludes_a_marker_date_before_the_visible_window():
+    # a marker date that IS present in df_weekly_full.index but falls
+    # before df_visible's start (outside the trimmed visible window) must
+    # be excluded from result.markers -- an out-of-window marker with no
+    # bound stretches the chart's inferred x-domain across the whole gap.
+    df = _weekly_df(40)  # visible window is df.index[8:40] for visible_weeks=32
+
+    result = build_chart_data(
+        df,
+        marker_dates={"SC": df.index[2]},
+        range_low=90.0, range_high=140.0, range_target=None,
+        visible_weeks=32, ma_window=30,
+    )
+
+    assert result.markers == []
+
+
 def test_build_chart_data_carries_range_and_target_through_unchanged():
     df = _weekly_df(40)
 

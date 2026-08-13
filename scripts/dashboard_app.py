@@ -18,6 +18,7 @@ import streamlit as st
 
 from weinstein_screener.chart_data import build_chart_data
 from weinstein_screener.data import get_cached_ohlcv
+from weinstein_screener.etapa1 import drop_unclosed_current_week
 from weinstein_screener.ict import find_entry_1_signal, find_entry_3_signal
 from weinstein_screener.indicators import average_true_range
 from weinstein_screener.management import (
@@ -125,12 +126,15 @@ def render_detail_screen():
 
     if st.button("← volver a la lista"):
         st.session_state["screen"] = "screener"
+        st.session_state["selected_ticker"] = None
+        st.session_state.pop("shortlist_table", None)
         st.rerun()
 
     with st.spinner(f"Analizando estructura Wyckoff/CRT/ICT de {ticker} (bajo demanda)…"):
         df_weekly = load_weekly(ticker)
         df_daily = load_daily(ticker)
-        structure = detect_wyckoff_structure(df_weekly)
+        df_weekly_closed = drop_unclosed_current_week(df_weekly)
+        structure = detect_wyckoff_structure(df_weekly_closed)
 
     st.markdown(f"## {ticker}  `${df_weekly['Close'].iloc[-1]:.2f}`")
 
@@ -138,13 +142,13 @@ def render_detail_screen():
         st.info("No se detecta una estructura Wyckoff de acumulación vigente para este ticker ahora mismo.")
         return
 
-    stage2 = weinstein_stage2_active(df_weekly).iloc[-1]
+    stage2 = weinstein_stage2_active(df_weekly_closed).iloc[-1]
     st.markdown(f"**Stage 2 activo**: {'sí' if stage2 else 'no'}")
 
-    atr_weekly = average_true_range(df_weekly)
+    atr_weekly = average_true_range(df_weekly_closed)
     atr_daily = average_true_range(df_daily)
 
-    entry2 = find_entry_2_signal(df_weekly, structure.jac_index, atr_weekly)
+    entry2 = find_entry_2_signal(df_weekly_closed, structure.jac_index, atr_weekly)
 
     # `structure.spring_index`/`structure.jac_index` are positions in df_weekly
     # (weekly bars) -- find_entry_1_signal/find_entry_3_signal need a position
@@ -154,21 +158,22 @@ def render_detail_screen():
     # position directly here would silently search the wrong days entirely.
     entry1 = None
     if structure.spring_index is not None:
-        spring_week_date = df_weekly.index[structure.spring_index]
+        spring_week_date = df_weekly_closed.index[structure.spring_index]
         daily_search_start = int(df_daily.index.searchsorted(spring_week_date))
         entry1 = find_entry_1_signal(df_daily, structure.range_low, daily_search_start, atr_daily)
 
     entry3 = None
     if structure.jac_index is not None:
-        jac_week_date = df_weekly.index[structure.jac_index]
-        daily_breakout_index = int(df_daily.index.searchsorted(jac_week_date))
+        jac_week_date = df_weekly_closed.index[structure.jac_index]
+        daily_breakout_index = int(df_daily.index.searchsorted(jac_week_date + pd.Timedelta(days=7))) - 1
+        daily_breakout_index = max(0, min(daily_breakout_index, len(df_daily) - 1))
         entry3 = find_entry_3_signal(df_daily, structure.range_high, daily_breakout_index, atr_daily)
 
     target = None
     extended = None
     if entry2 is not None:
         target = project_range_target(entry2.entry_price, structure.range_high, structure.range_low)
-        extended = evaluate_extended_move(df_weekly["Close"].iloc[-1], entry2.entry_price, target)
+        extended = evaluate_extended_move(df_weekly_closed["Close"].iloc[-1], entry2.entry_price, target)
 
     if extended is not None and extended.is_extended:
         st.warning(
@@ -177,9 +182,9 @@ def render_detail_screen():
             "— el ratio riesgo/beneficio de una entrada nueva aquí es pobre."
         )
 
-    marker_dates = _marker_dates(df_weekly, df_daily, structure, entry3)
+    marker_dates = _marker_dates(df_weekly_closed, df_daily, structure, entry3)
     chart_data = build_chart_data(
-        df_weekly,
+        df_weekly_closed,
         marker_dates,
         range_low=structure.range_low,
         range_high=structure.range_high,
@@ -209,24 +214,29 @@ def render_detail_screen():
         # triggered Entry 1 was actually later stopped out requires walking
         # the daily price path after `entry1.trigger_index` looking for a
         # touch of `entry1.stop_loss`, which no existing function in this
-        # codebase computes. Out of scope for this task: it under-reports
-        # the "Spring fallido" resize alert (never fires) rather than
-        # over-reporting it, which is the safer direction for an
-        # alerts-only tool. Documented here explicitly, not left as a
-        # silent gap -- a follow-up task should add that check properly.
+        # codebase computes. This is NOT purely safe: it can OVER-report the
+        # breakeven alert below (firing even when Entry 1 was actually
+        # stopped out and no position exists), not just under-report the
+        # resize alerts (which this UI doesn't display anyway). Documented
+        # here and in the alert text -- a follow-up task should add a real
+        # stop-out check.
         management = evaluate_position_management(
             entry1_triggered=entry1 is not None,
             entry1_stopped_out=False,
             entry2_triggered=True,
         )
         if management.move_entry1_to_breakeven:
-            st.info("Alerta: mover el stop de la Entrada 1 a breakeven.")
+            st.info(
+                "Alerta: mover el stop de la Entrada 1 a breakeven. "
+                "(No se comprueba si la Entrada 1 ya fue detenida por su stop -- puede sobre-reportar en ese caso.)"
+            )
 
-    if target is not None:
+    if entry2 is not None:
         exit_signal = evaluate_exit_signal(
-            df_weekly["Close"].iloc[-1], target, bool(close_above_ma(df_weekly).iloc[-1])
+            df_weekly_closed["Close"].iloc[-1], target, bool(close_above_ma(df_weekly_closed).iloc[-1])
         )
-        st.markdown(f"**Objetivo proyectado**: `${target:.2f}`")
+        if target is not None:
+            st.markdown(f"**Objetivo proyectado**: `${target:.2f}`")
         if exit_signal.full_exit:
             st.error("Salida total: cierre semanal bajo la MA30w.")
         elif exit_signal.partial_take_profit:

@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from weinstein_screener.data import get_cached_ohlcv
+from weinstein_screener.etapa1 import drop_unclosed_current_week
 from weinstein_screener.fundamentals import fetch_fundamentals_for_candidates
 from weinstein_screener.indicators import relative_volume
 
@@ -95,6 +96,7 @@ def main(argv: list[str] | None = None) -> None:
     for ticker in tickers:
         try:
             df_weekly = get_cached_ohlcv(ticker, interval="1wk", cache_dir=Path(args.cache_dir), period="2y")
+            df_weekly = drop_unclosed_current_week(df_weekly)
             relative_volume_by_ticker[ticker] = relative_volume(df_weekly)
         except Exception:
             relative_volume_by_ticker[ticker] = None
