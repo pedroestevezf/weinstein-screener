@@ -44,3 +44,30 @@ def average_true_range(df: pd.DataFrame, window: int = 14, method: str = "sma") 
     if method == "wilder":
         return true_range.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
     return true_range.rolling(window=window).mean()
+
+
+def relative_volume(df_weekly: pd.DataFrame, recent_weeks: int = 3, baseline_weeks: int = 20) -> float | None:
+    """Volumen medio de las últimas `recent_weeks` semanas cerradas ÷ volumen
+    medio de las `baseline_weeks` semanas inmediatamente anteriores a esas.
+
+    Un valor alto sugiere actividad reciente por encima de lo habitual en
+    ese valor (posible interés institucional) -- se compara contra una
+    media de varias semanas, no una sola vela, para no reaccionar a ruido
+    de una única semana atípica.
+
+    None si no hay histórico suficiente, o si la media de la ventana base
+    es cero (evita división por cero / ratio sin sentido).
+    """
+    total_needed = recent_weeks + baseline_weeks
+    if len(df_weekly) < total_needed:
+        return None
+
+    volumes = df_weekly["Volume"]
+    recent = volumes.iloc[-recent_weeks:]
+    baseline = volumes.iloc[-total_needed:-recent_weeks]
+
+    baseline_mean = baseline.mean()
+    if baseline_mean == 0:
+        return None
+
+    return float(recent.mean() / baseline_mean)

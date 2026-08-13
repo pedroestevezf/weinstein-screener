@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from weinstein_screener.indicators import average_true_range, ma_slope, moving_average, pct_distance_from_ma
+from weinstein_screener.indicators import average_true_range, ma_slope, moving_average, pct_distance_from_ma, relative_volume
 
 
 def _sample_df():
@@ -107,3 +107,47 @@ def test_pct_distance_from_ma_is_zero_when_price_equals_ma():
     distance = pct_distance_from_ma(prices, mas)
 
     assert (distance == 0).all()
+
+
+def test_relative_volume_computes_recent_vs_baseline_ratio():
+    # 20 baseline weeks at volume 1,000,000, then 3 recent weeks at 2,000,000
+    # each -> relative_volume should be exactly 2.0
+    rows = [{"Volume": 1_000_000} for _ in range(20)] + [{"Volume": 2_000_000} for _ in range(3)]
+    df = pd.DataFrame(rows, index=pd.date_range("2020-01-06", periods=len(rows), freq="W-MON"))
+
+    result = relative_volume(df, recent_weeks=3, baseline_weeks=20)
+
+    assert result == pytest.approx(2.0)
+
+
+def test_relative_volume_returns_none_with_insufficient_history():
+    rows = [{"Volume": 1_000_000} for _ in range(10)]  # needs 3 + 20 = 23
+    df = pd.DataFrame(rows, index=pd.date_range("2020-01-06", periods=len(rows), freq="W-MON"))
+
+    result = relative_volume(df, recent_weeks=3, baseline_weeks=20)
+
+    assert result is None
+
+
+def test_relative_volume_returns_none_when_baseline_mean_is_zero():
+    rows = [{"Volume": 0} for _ in range(20)] + [{"Volume": 500_000} for _ in range(3)]
+    df = pd.DataFrame(rows, index=pd.date_range("2020-01-06", periods=len(rows), freq="W-MON"))
+
+    result = relative_volume(df, recent_weeks=3, baseline_weeks=20)
+
+    assert result is None
+
+
+def test_relative_volume_uses_only_the_immediately_preceding_baseline_window():
+    # An old spike far outside the 20-week baseline window must NOT affect
+    # the result -- only the 20 weeks immediately before the 3 recent ones count.
+    rows = (
+        [{"Volume": 9_000_000}]  # old spike, outside the baseline window
+        + [{"Volume": 1_000_000} for _ in range(20)]  # baseline window
+        + [{"Volume": 1_000_000} for _ in range(3)]  # recent window, matches baseline
+    )
+    df = pd.DataFrame(rows, index=pd.date_range("2020-01-06", periods=len(rows), freq="W-MON"))
+
+    result = relative_volume(df, recent_weeks=3, baseline_weeks=20)
+
+    assert result == pytest.approx(1.0)
