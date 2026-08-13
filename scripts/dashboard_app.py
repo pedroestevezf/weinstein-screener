@@ -35,7 +35,7 @@ from weinstein_screener.wyckoff import detect_wyckoff_structure
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 ENRICHED_SHORTLIST_PATH = _REPO_ROOT / "data_cache" / "etapa1_shortlist_enriched.csv"
 OHLCV_CACHE_DIR = _REPO_ROOT / "data_cache" / "ohlcv"
-VISIBLE_WEEKS = 32
+VISIBLE_WEEKS = 52
 MA_WINDOW = 30
 
 
@@ -46,8 +46,8 @@ def load_shortlist() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600)
 def load_weekly(ticker: str) -> pd.DataFrame:
-    # `period="5y"` comfortably covers VISIBLE_WEEKS + MA_WINDOW (62 weeks
-    # ~= 1.2 years) plus the longer Wyckoff structure lookback in
+    # `period="5y"` comfortably covers VISIBLE_WEEKS + MA_WINDOW (82 weeks
+    # ~= 1.6 years) plus the longer Wyckoff structure lookback in
     # `detect_wyckoff_structure` (up to sc_search_window=52 weeks back from
     # the ST) -- verified against both defaults, not guessed.
     return get_cached_ohlcv(ticker, interval="1wk", cache_dir=OHLCV_CACHE_DIR, period="5y")
