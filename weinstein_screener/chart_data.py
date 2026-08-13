@@ -31,6 +31,8 @@ class ChartData:
     range_low: float
     range_high: float
     range_target: float | None
+    sc_date: pd.Timestamp | None
+    jac_date: pd.Timestamp | None
 
 
 def build_chart_data(
@@ -62,6 +64,11 @@ def build_chart_data(
     `wyckoff.py`/`ict.py` a propósito -- el llamador convierte
     `structure.sc_index` etc. a fechas antes de invocar esta función, así
     este módulo no necesita conocer esas convenciones de indexado.
+
+    `sc_date`/`jac_date` se leen directamente de `marker_dates`, no de la
+    lista `markers` ya filtrada por ventana visible -- los límites del
+    rango de acumulación (ver `rendering.py`) necesitan la fecha real del
+    SC/JAC aunque, en el caso límite, cayera fuera de la ventana visible.
     """
     ma_full = moving_average(df_weekly_full, window=ma_window)
     df_visible = df_weekly_full.iloc[-visible_weeks:]
@@ -86,4 +93,6 @@ def build_chart_data(
         range_low=range_low,
         range_high=range_high,
         range_target=range_target,
+        sc_date=marker_dates.get("SC"),
+        jac_date=marker_dates.get("JAC"),
     )
