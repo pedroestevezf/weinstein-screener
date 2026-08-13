@@ -114,21 +114,43 @@ def test_build_chart_data_excludes_a_marker_date_outside_the_dataframe():
     assert result.markers == []
 
 
-def test_build_chart_data_excludes_a_marker_date_before_the_visible_window():
-    # a marker date that IS present in df_weekly_full.index but falls
-    # before df_visible's start (outside the trimmed visible window) must
-    # be excluded from result.markers -- an out-of-window marker with no
-    # bound stretches the chart's inferred x-domain across the whole gap.
-    df = _weekly_df(40)  # visible window is df.index[8:40] for visible_weeks=32
+def test_build_chart_data_widens_the_visible_window_to_include_an_early_marker():
+    # a marker date earlier than the default `visible_weeks` window (e.g.
+    # SC found near the edge of `sc_search_window` in wyckoff.py, commonly
+    # 35-42 weeks back in practice) must NOT be silently cropped out -- the
+    # window widens to include it, with `context_margin_weeks` of padding
+    # before it so the pre-SC decline is visible for context too.
+    df = _weekly_df(60)  # default window is df.index[28:60] for visible_weeks=32
+    sc_date = df.index[10]  # 50 weeks back from the end, well outside the default window
 
     result = build_chart_data(
         df,
-        marker_dates={"SC": df.index[2]},
+        marker_dates={"SC": sc_date},
         range_low=90.0, range_high=140.0, range_target=None,
-        visible_weeks=32, ma_window=30,
+        visible_weeks=32, ma_window=30, context_margin_weeks=8,
     )
 
-    assert result.markers == []
+    assert {m.label for m in result.markers} == {"SC"}
+    assert result.df_visible.index[0] == df.index[2]  # sc_date's position (10) minus the 8-week margin
+    assert result.df_visible.index[-1] == df.index[-1]
+
+
+def test_build_chart_data_caps_the_widened_window_at_the_available_history():
+    # if honoring the margin would reach before the start of the data,
+    # cap at what's actually available rather than erroring or padding
+    # with nothing.
+    df = _weekly_df(40)
+    sc_date = df.index[2]
+
+    result = build_chart_data(
+        df,
+        marker_dates={"SC": sc_date},
+        range_low=90.0, range_high=140.0, range_target=None,
+        visible_weeks=32, ma_window=30, context_margin_weeks=8,
+    )
+
+    assert result.df_visible.index[0] == df.index[0]
+    assert any(m.label == "SC" for m in result.markers)
 
 
 def test_build_chart_data_carries_range_and_target_through_unchanged():
