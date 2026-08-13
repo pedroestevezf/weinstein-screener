@@ -11,12 +11,23 @@ NASDAQ_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.tx
 OTHER_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
 
 # Excluye instrumentos que no son acciones comunes "puras": SPAC units/warrants/rights,
-# preferentes, ADS/ADR (depositary shares) y vehículos de adquisición/trust. El \b antes
-# del término y el "s?" opcional (en vez de quitar el \b final) evitan tanto el falso
-# negativo real detectado en el prototipo ("Units" no matcheaba con `unit\b`) como un
-# posible falso positivo por matchear el fragmento dentro de otra palabra.
+# preferentes, ADS/ADR (depositary shares), vehículos de adquisición/trust, y bonos
+# corporativos/notas cotizadas (baby bonds -- p. ej. "8.875% Senior Notes due 2030",
+# "5.875% ... Subordinated Debentures due 2062"). El \b antes del término y el "s?"
+# opcional (en vez de quitar el \b final) evitan tanto el falso negativo real detectado
+# en el prototipo ("Units" no matcheaba con `unit\b`) como un posible falso positivo por
+# matchear el fragmento dentro de otra palabra.
+#
+# Para bonos, NO se usa `\bsenior\b` como término aislado -- "Senior" aparece también en
+# nombres reales de empresas (p. ej. "Brookdale Senior Living Inc. Common Stock") y
+# marcaría un falso positivo. En su lugar se detectan por instrumento ("notes"/
+# "debentures"/"bonds"), por el signo "%" de cupón fijo/flotante (una acción común
+# nunca lo lleva en el nombre listado), o por vencimiento explícito ("due 20XX") --
+# cualquiera de las tres basta, y entre las tres cubren también casos sin ninguna de
+# las palabras de instrumento (p. ej. "... 3.50% Adjustable Corp Backed Tr Certs").
 _EXCLUDE_NAME_PATTERN = re.compile(
-    r"\bunits?\b|\bwarrants?\b|\brights?\b|\bpreferred\b|\bdepositary\b|\bacquisition\b|\btrust\b",
+    r"\bunits?\b|\bwarrants?\b|\brights?\b|\bpreferred\b|\bdepositary\b|\bacquisition\b|\btrust\b"
+    r"|\bnotes?\b|\bdebentures?\b|\bbonds?\b|%|\bdue\s+20\d{2}\b",
     re.IGNORECASE,
 )
 

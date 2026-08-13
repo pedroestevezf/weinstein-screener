@@ -204,6 +204,61 @@ def test_filter_common_stock_excludes_acquisition_corp_ordinary_share():
     assert filter_common_stock(records) == []
 
 
+def test_filter_common_stock_excludes_corporate_notes_with_coupon_and_maturity():
+    # Bono corporativo cotizado real ("baby bond") -- no es una acción común.
+    records = [
+        SymbolRecord(
+            symbol="CIMP",
+            name="Chimera Investment Corporation 8.875% Senior Notes due 2030",
+            test_issue=False,
+            etf=False,
+        )
+    ]
+
+    assert filter_common_stock(records) == []
+
+
+def test_filter_common_stock_excludes_subordinated_debentures():
+    records = [
+        SymbolRecord(
+            symbol="KMPB",
+            name="Kemper Corporation 5.875% Fixed-Rate Reset Junior Subordinated Debentures due 2062",
+            test_issue=False,
+            etf=False,
+        )
+    ]
+
+    assert filter_common_stock(records) == []
+
+
+def test_filter_common_stock_excludes_coupon_percent_without_notes_or_bonds_keyword():
+    # Certificado respaldado por deuda cuyo nombre no contiene "notes"/
+    # "bonds"/"debentures" -- el signo "%" de cupón por sí solo debe bastar
+    # para excluirlo (caso real encontrado en el universo).
+    records = [
+        SymbolRecord(
+            symbol="JBK",
+            name="Lehman ABS 3.50 3.50% Adjustable Corp Backed Tr Certs GS Cap I",
+            test_issue=False,
+            etf=False,
+        )
+    ]
+
+    assert filter_common_stock(records) == []
+
+
+def test_filter_common_stock_keeps_common_stock_whose_name_contains_senior():
+    # "Senior" en el nombre de una empresa real (no un bono) no debe excluirla
+    # -- por eso el filtro de bonos NO usa `\bsenior\b` como término aislado.
+    records = [
+        SymbolRecord(
+            symbol="BKD", name="Brookdale Senior Living Inc. Common Stock", test_issue=False, etf=False
+        )
+    ]
+
+    assert filter_common_stock(records) == ["BKD"]
+
+
 def test_parse_other_listed_normalizes_dot_form_dual_class_symbol_to_dash():
     # "ACT Symbol" en notación de punto ("BRK.A") no matchea la convención de
     # guion de Yahoo Finance ("BRK-A") y queda silenciosamente sin datos
