@@ -27,12 +27,13 @@ from weinstein_screener.management import (
     find_entry_2_signal,
     project_range_target,
 )
-from weinstein_screener.regime import weinstein_stage2_active
+from weinstein_screener.regime import close_above_ma, weinstein_stage2_active
 from weinstein_screener.rendering import render_price_chart
 from weinstein_screener.wyckoff import detect_wyckoff_structure
 
-ENRICHED_SHORTLIST_PATH = Path("data_cache/etapa1_shortlist_enriched.csv")
-OHLCV_CACHE_DIR = Path("data_cache/ohlcv")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+ENRICHED_SHORTLIST_PATH = _REPO_ROOT / "data_cache" / "etapa1_shortlist_enriched.csv"
+OHLCV_CACHE_DIR = _REPO_ROOT / "data_cache" / "ohlcv"
 VISIBLE_WEEKS = 32
 MA_WINDOW = 30
 
@@ -43,7 +44,7 @@ def load_shortlist() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600)
-def load_weekly(ticker: str, min_weeks: int) -> pd.DataFrame:
+def load_weekly(ticker: str) -> pd.DataFrame:
     # `period="5y"` comfortably covers VISIBLE_WEEKS + MA_WINDOW (62 weeks
     # ~= 1.2 years) plus the longer Wyckoff structure lookback in
     # `detect_wyckoff_structure` (up to sc_search_window=52 weeks back from
@@ -110,9 +111,10 @@ def render_screener_screen():
     selected_rows = event.selection.rows if hasattr(event, "selection") else []
     if selected_rows:
         selected_ticker = df.iloc[selected_rows[0]]["ticker"]
-        st.session_state["selected_ticker"] = selected_ticker
-        st.session_state["screen"] = "detail"
-        st.rerun()
+        if st.session_state.get("selected_ticker") != selected_ticker:
+            st.session_state["selected_ticker"] = selected_ticker
+            st.session_state["screen"] = "detail"
+            st.rerun()
 
 
 def render_detail_screen():
@@ -126,7 +128,7 @@ def render_detail_screen():
         st.rerun()
 
     with st.spinner(f"Analizando estructura Wyckoff/CRT/ICT de {ticker} (bajo demanda)…"):
-        df_weekly = load_weekly(ticker, VISIBLE_WEEKS + MA_WINDOW)
+        df_weekly = load_weekly(ticker)
         df_daily = load_daily(ticker)
         structure = detect_wyckoff_structure(df_weekly)
 
@@ -222,7 +224,7 @@ def render_detail_screen():
 
     if target is not None:
         exit_signal = evaluate_exit_signal(
-            df_weekly["Close"].iloc[-1], target, bool(weinstein_stage2_active(df_weekly).iloc[-1])
+            df_weekly["Close"].iloc[-1], target, bool(close_above_ma(df_weekly).iloc[-1])
         )
         st.markdown(f"**Objetivo proyectado**: `${target:.2f}`")
         if exit_signal.full_exit:
@@ -238,10 +240,9 @@ def main():
     if "screen" not in st.session_state:
         st.session_state["screen"] = "screener"
 
-    tab_screener, tab_detail = st.tabs(["Screener Filtrado", "Detalle de ticker"])
-    with tab_screener:
+    if st.session_state["screen"] == "screener":
         render_screener_screen()
-    with tab_detail:
+    else:
         render_detail_screen()
 
 
